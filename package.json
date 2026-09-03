@@ -1,14 +1,17 @@
 {
   "name": "gtm-autopilot",
   "version": "1.0.0",
-  "description": "",
+  "description": "GTM Decision Infrastructure",
   "main": "index.js",
   "directories": {
     "test": "tests"
   },
   "scripts": {
     "test": "vitest",
-    "migrate": "node db/migrate.js"
+    "test:run": "vitest run",
+    "test:security": "vitest run tests/security/",
+    "migrate": "node db/migrate.js",
+    "typecheck": "tsc --noEmit"
   },
   "repository": {
     "type": "git",
@@ -23,7 +26,14 @@
   },
   "homepage": "https://github.com/VallabhKulkarni-09/GTM-Autopilot#readme",
   "dependencies": {
+    "@supabase/supabase-js": "^2.50.5",
     "dotenv": "^17.4.2",
+    "fastify": "^5.4.0",
     "pg": "^8.23.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "typescript": "^5.8.3",
+    "vitest": "^3.2.4"
   }
 }
