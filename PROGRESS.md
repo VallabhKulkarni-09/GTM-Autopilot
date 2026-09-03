@@ -21,10 +21,10 @@ what is blocked, and what comes next.
 ## Current State
 
 ```
-Status:        PLANNING COMPLETE — NOT STARTED
-Last updated:  [DATE OF FIRST SESSION]
-Last session:  Setup session — no code written yet
-Active branch: none
+Status:        SCHEMA BUILT — AWAITING MIGRATION RUN + GITHUB PUSH
+Last updated:  2026-09-03
+Last session:  schema-builder — all 13 migrations + TypeScript types written
+Active branch: feat/schema (local only — push blocked, see Blockers)
 ```
 
 ---
@@ -80,8 +80,34 @@ Use this to understand what can be built in parallel and what must wait.
 
 ## What Has Been Built
 
-### Session 1 — [DATE]
-*No sessions completed yet. Update this after first session.*
+### Session 1 — 2026-09-03
+
+**schema-builder agent** ran and produced:
+
+**Migration files created** (`db/migrations/`):
+- `001_organizations.sql` — root entity
+- `002_leads.sql` — canonical lead with `form_submitted_at` (SLA clock)
+- `003_companies.sql` — canonical company + FK back to leads
+- `004_external_identity.sql` — provider ID mapping table
+- `005_evidence.sql` — enrichment results with `is_current` partial index
+- `006_policy_rules.sql` — versioned ICP/territory/SLA/dedup/routing rules
+- `007_action_risk_registry.sql` — risk profile per action type
+- `008_play_instance.sql` — play lifecycle with SLA deadline tracking
+- `009_event_log.sql` — **IMMUTABLE**, NO `updated_at`, `decision_snapshot JSONB NOT NULL`
+- `010_action_execution_state.sql` — mutable read-model projected from event_log
+- `011_connector_config.sql` — vault key refs + health status
+- `012_routing_state.sql` — persistent round-robin counters
+- `013_rls_policies.sql` — RLS on all 12 tables, event_log INSERT+SELECT only
+
+**TypeScript types generated**: `src/domain/db-types.ts`
+- All 12 table row types, insert types, update types
+- Full enum types matching SQL enums
+- `DecisionSnapshot` named type (never null)
+- `EventLog` type has NO `updated_at` field
+
+**Migration runner**: `db/run-migrations.sh` — runs all 13 in order with post-run verification
+
+**Committed locally**: branch `feat/schema`, commit `81ef7ed`
 
 ---
 
@@ -93,7 +119,16 @@ Use this to understand what can be built in parallel and what must wait.
 
 ## What Is Blocked
 
-*Nothing yet.*
+### Blocker 1: GitHub Push
+- **Issue**: PAT in `.agent/armoury/github.json` authenticates via API but does NOT have `repo:write` scope for `git push`.
+- **Fix**: Go to GitHub → Settings → Developer Settings → Personal Access Tokens → find this token → add `repo` scope (Contents: read & write). Then run: `cd /home/vallabh/Documents/gtm-autopilot && git push -u origin feat/schema`
+
+### Blocker 2: Supabase Migration Run
+- **Issue**: The `${SUPABASE_MCP_TOKEN}` key in armoury is a Supabase MCP access token, NOT the `service_role` JWT needed to run raw SQL.
+- **Fix needed**: Two options:
+  1. **Get the service_role key**: Supabase Dashboard → Project Settings → API → `service_role` key (starts with the JWT format). Add to `.env` as `SUPABASE_SERVICE_KEY`. Then run: `bash db/run-migrations.sh`
+  2. **Get the DB connection string**: Supabase Dashboard → Project Settings → Database → URI. Then: `SUPABASE_DB_URL="postgresql://postgres:[password]@db.urdhebsbnjbtdnookwmk.supabase.co:5432/postgres" bash db/run-migrations.sh`
+- **Also needed**: `SUPABASE_ANON_KEY` from the same API settings page → add to `.env`
 
 ---
 
@@ -282,7 +317,8 @@ NODE_ENV=development
 
 | Session | Date | What Was Built | What Passed Review | Blockers |
 |---------|------|---------------|-------------------|----------|
-| 0 | [DATE] | Planning only. All MD files created. | — | — |
+| 0 | 2026-09-03 | Planning only. All MD files created. | — | — |
+| 1 | 2026-09-03 | 13 migrations + `db-types.ts` + migration runner script. Committed to `feat/schema` locally. | Pending: need to run against Supabase + push to GitHub | GitHub PAT needs `repo:write`; Supabase needs real `service_role` JWT |
 
 ---
 
