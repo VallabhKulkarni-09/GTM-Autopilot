@@ -1,0 +1,23 @@
+{
+  "name": "supabase-mcp",
+  "type": "url",
+  "url": "https://mcp.supabase.com/sse",
+  "description": "Supabase database access. Use for running migrations, executing SQL, listing tables, and describing schema. Always run migrations in numbered order.",
+  "capabilities": [
+    "run_migrations",
+    "execute_sql",
+    "list_tables",
+    "describe_schema",
+    "get_table_definition"
+  ],
+  "env": {
+    "SUPABASE_URL": "${SUPABASE_URL}",
+    "SUPABASE_SERVICE_KEY": "${SUPABASE_SERVICE_KEY}"
+  },
+  "rules": [
+    "Always run migrations in order (001, 002, 003...)",
+    "Confirm each migration succeeded before running the next",
+    "Never run DROP TABLE on production without explicit instruction",
+    "Always verify organization_id exists on every newly created table"
+  ]
+}

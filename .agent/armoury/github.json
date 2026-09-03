@@ -1,0 +1,27 @@
+{
+  "name": "github-mcp",
+  "type": "url",
+  "url": "https://api.githubcopilot.com/mcp",
+  "description": "GitHub for file commits, branch management, and pull requests. Every agent commits to its own named branch. Never commit directly to main.",
+  "capabilities": [
+    "create_file",
+    "update_file",
+    "create_branch",
+    "create_pull_request",
+    "list_files",
+    "get_file_contents",
+    "list_branches"
+  ],
+  "env": {
+    "GITHUB_TOKEN": "${GITHUB_TOKEN}",
+    "REPO": "${GITHUB_REPO}"
+  },
+  "rules": [
+    "Every agent works on its own branch (feat/{task-name})",
+    "Never commit directly to main",
+    "Commit messages: feat(scope): description",
+    "One PR per agent task",
+    "Check if file exists before creating to avoid conflicts",
+    "Always read GEMINI.md from main before starting work"
+  ]
+}
