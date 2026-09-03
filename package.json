@@ -1,0 +1,29 @@
+{
+  "name": "gtm-autopilot",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "directories": {
+    "test": "tests"
+  },
+  "scripts": {
+    "test": "vitest",
+    "migrate": "node db/migrate.js"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/VallabhKulkarni-09/GTM-Autopilot.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "module",
+  "bugs": {
+    "url": "https://github.com/VallabhKulkarni-09/GTM-Autopilot/issues"
+  },
+  "homepage": "https://github.com/VallabhKulkarni-09/GTM-Autopilot#readme",
+  "dependencies": {
+    "dotenv": "^17.4.2",
+    "pg": "^8.23.0"
+  }
+}
