@@ -1,0 +1,24 @@
+{
+  "name": "railway-mcp",
+  "type": "url",
+  "url": "https://mcp.railway.app/sse",
+  "description": "Railway deployment, log access, and environment variable management. Use for deploying the Fastify API and BullMQ worker services.",
+  "capabilities": [
+    "deploy_service",
+    "get_logs",
+    "set_env_var",
+    "get_service_status",
+    "list_services",
+    "get_deployment_status"
+  ],
+  "env": {
+    "RAILWAY_TOKEN": "${RAILWAY_TOKEN}"
+  },
+  "rules": [
+    "Never set secrets directly — use Railway's secret store",
+    "Always check deployment status after deploying",
+    "Tail logs for at least 30 seconds after a new deployment to catch startup errors",
+    "The API service and BullMQ worker are two separate Railway services",
+    "Never delete a service without explicit instruction"
+  ]
+}
