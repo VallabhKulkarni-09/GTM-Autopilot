@@ -1,6 +1,12 @@
 import { defineConfig } from 'vitest/config'
 
 export default defineConfig({
+  resolve: {
+    // Strip .js extensions so vitest resolves .ts files (ESM-compatible imports)
+    extensionAlias: {
+      '.js': ['.ts', '.js'],
+    },
+  },
   test: {
     globals: true,
     environment: 'node',
@@ -11,3 +17,5 @@ export default defineConfig({
     exclude: ['node_modules', 'dist'],
   },
 })
+
+
