@@ -27,13 +27,16 @@
   "homepage": "https://github.com/VallabhKulkarni-09/GTM-Autopilot#readme",
   "dependencies": {
     "@supabase/supabase-js": "^2.109.0",
+    "bullmq": "^6.3.4",
     "dotenv": "^17.4.2",
     "fastify": "^5.12.3",
+    "ioredis": "^6.0.0",
     "pg": "^8.23.0"
   },
   "devDependencies": {
     "@types/node": "^22.20.1",
     "typescript": "^5.9.3",
+    "vite-tsconfig-paths": "^6.1.1",
     "vitest": "^3.2.4"
   }
 }
