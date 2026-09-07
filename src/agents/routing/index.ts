@@ -11,6 +11,7 @@ export class RoutingAgent {
   readonly name = 'routing-agent'
   readonly version = '1.0.0'
 
+  /** Primary API — used by the rule-based v1 pipeline */
   run(input: import('./types.js').RoutingInput): ProposedAction {
     const result = computeRouting(input)
 
@@ -35,6 +36,11 @@ export class RoutingAgent {
       decisionRiskScore: 0.0,
       rawConfidence: 1.0,
     }
+  }
+
+  /** Async execute() alias — compatible with LangGraph node interface */
+  async execute(input: any, _context?: any): Promise<ProposedAction> {
+    return this.run(input)
   }
 }
 
