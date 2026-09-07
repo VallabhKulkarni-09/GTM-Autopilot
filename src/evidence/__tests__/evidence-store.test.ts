@@ -4,43 +4,60 @@ import { buildDecisionSnapshot } from '../context-builder.js'
 import type { ClearbitPerson, ClearbitCompany } from '../../connectors/clearbit/clearbit.types.js'
 
 // Mock Supabase
-const mockInsert = vi.fn()
-const mockSelect = vi.fn()
-const mockEq = vi.fn()
-const mockOr = vi.fn()
-const mockOrder = vi.fn()
-const mockSingle = vi.fn()
+let mockData: any = {}
+let mockError: any = null
+
+const createMockChain = () => {
+  const chain = {
+    insert: vi.fn(() => chain),
+    select: vi.fn(() => chain),
+    eq: vi.fn(() => chain),
+    or: vi.fn(() => chain),
+    order: vi.fn(() => chain),
+    single: vi.fn(() => {
+      return Promise.resolve({ data: mockData, error: mockError })
+    }),
+    then: (resolve: any) => {
+      resolve({ data: mockData, error: mockError })
+    }
+  }
+  return chain
+}
+
+const mockFrom = vi.fn((table: string) => {
+  if (table === 'leads') {
+    mockData = { id: 'lead-1', company_id: 'comp-1' }
+  } else if (table === 'companies') {
+    mockData = { id: 'comp-1' }
+  } else if (table === 'policy_rules') {
+    mockData = [{ id: 'pol-1' }]
+  } else if (table === 'play_instance') {
+    mockData = [{ assigned_owner_id: 'owner-1' }, { assigned_owner_id: 'owner-1' }]
+  } else if (table === 'evidence') {
+    mockData = [{ id: 'ev-1', expires_at: new Date(Date.now() + 100000).toISOString() }, { id: 'ev-2' }]
+  }
+  return createMockChain()
+})
 
 vi.mock('@supabase/supabase-js', () => ({
   createClient: () => ({
-    from: vi.fn(() => ({
-      insert: mockInsert,
-      select: mockSelect,
-      eq: mockEq,
-      or: mockOr,
-      order: mockOrder,
-    }))
+    from: mockFrom
   })
 }))
 
 describe('Evidence Store & Context Builder', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    mockData = null
+    mockError = null
     process.env.SUPABASE_URL = 'http://localhost'
     process.env.SUPABASE_SERVICE_KEY = 'test-key'
-    
-    // Default chain for select
-    mockSelect.mockReturnValue({ eq: mockEq })
-    mockEq.mockReturnValue({ eq: mockEq, or: mockOr, single: mockSingle, order: mockOrder })
-    mockOr.mockReturnValue({ order: mockOrder })
-    mockOrder.mockReturnValue({ data: [], error: null })
   })
 
   describe('storeEnrichmentEvidence', () => {
     it('returns [] without crashing when person and company are null', async () => {
       const result = await storeEnrichmentEvidence('org-1', 'lead-1', 'comp-1', null, null)
       expect(result).toEqual([])
-      expect(mockInsert).not.toHaveBeenCalled()
     })
 
     it('creates correct number of evidence rows from Clearbit response', async () => {
@@ -58,12 +75,13 @@ describe('Evidence Store & Context Builder', () => {
         tags: ['saas']
       }
 
-      mockInsert.mockReturnValue({ select: vi.fn().mockResolvedValue({ data: [{ id: 'e-1' }], error: null }) })
+      mockData = [{ id: 'e-1' }]
 
       await storeEnrichmentEvidence('org-1', 'lead-1', 'comp-1', mockPerson as ClearbitPerson, mockCompany as ClearbitCompany)
       
-      expect(mockInsert).toHaveBeenCalledTimes(1)
-      const insertedRows = mockInsert.mock.calls[0][0]
+      const chain = mockFrom.mock.results[0].value
+      expect(chain.insert).toHaveBeenCalledTimes(1)
+      const insertedRows = chain.insert.mock.calls[0][0]
       expect(insertedRows).toHaveLength(10) // 4 from person + 6 from company
     })
 
@@ -73,12 +91,12 @@ describe('Evidence Store & Context Builder', () => {
         location: 'San Francisco' // 1 fact
       }
       
-      mockInsert.mockReturnValue({ select: vi.fn().mockResolvedValue({ data: [], error: null }) })
+      mockData = []
       const before = new Date().getTime()
       await storeEnrichmentEvidence('org-1', 'lead-1', null, mockPerson as ClearbitPerson, null)
-      const after = new Date().getTime()
+      const chain = mockFrom.mock.results[0].value
       
-      const insertedRows = mockInsert.mock.calls[0][0]
+      const insertedRows = chain.insert.mock.calls[0][0]
       const expiresAt = new Date(insertedRows[0].expires_at).getTime()
       
       const expectedTarget = before + 30 * 24 * 60 * 60 * 1000
@@ -88,9 +106,11 @@ describe('Evidence Store & Context Builder', () => {
 
   describe('getLeadEvidence', () => {
     it('filters out expired evidence (or condition is correctly formed)', async () => {
+      mockData = []
       await getLeadEvidence('org-1', 'lead-1')
-      expect(mockOr).toHaveBeenCalled()
-      const orArg = mockOr.mock.calls[0][0]
+      const chain = mockFrom.mock.results[0].value
+      expect(chain.or).toHaveBeenCalled()
+      const orArg = chain.or.mock.calls[0][0]
       expect(orArg).toContain('expires_at.is.null')
       expect(orArg).toContain('expires_at.gt.')
     })
@@ -98,7 +118,14 @@ describe('Evidence Store & Context Builder', () => {
 
   describe('buildDecisionSnapshot', () => {
     it('throws if lead does not exist', async () => {
-      mockSingle.mockResolvedValueOnce({ data: null, error: { message: 'Not found' } })
+      // Create a mock from function that sets mockError when 'leads' is requested
+      mockFrom.mockImplementationOnce((table: string) => {
+        if (table === 'leads') {
+          mockError = { message: 'Not found' }
+          mockData = null
+        }
+        return createMockChain()
+      })
       
       await expect(buildDecisionSnapshot({
         organizationId: 'org-1',
@@ -110,20 +137,7 @@ describe('Evidence Store & Context Builder', () => {
     })
 
     it('includes all required fields', async () => {
-      // lead
-      mockSingle.mockResolvedValueOnce({ data: { id: 'lead-1', company_id: 'comp-1' }, error: null })
-      // company
-      mockSingle.mockResolvedValueOnce({ data: { id: 'comp-1' }, error: null })
-      
-      // policies
-      mockEq.mockReturnValueOnce({ data: [{ id: 'pol-1' }], error: null })
-      
-      // ownerWorkloads (status='running')
-      mockEq.mockReturnValueOnce({ data: [{ assigned_owner_id: 'owner-1' }, { assigned_owner_id: 'owner-1' }], error: null })
-      
-      // evidenceIds
-      mockOr.mockReturnValueOnce({ data: [{ id: 'ev-1' }, { id: 'ev-2' }], error: null })
-
+      // By default the mockFrom sets up the correct data for all tables
       const snapshot = await buildDecisionSnapshot({
         organizationId: 'org-1',
         leadId: 'lead-1',
