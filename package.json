@@ -7,6 +7,9 @@
     "test": "tests"
   },
   "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "start": "node dist/server.js",
+    "start:worker": "node dist/queue/start-workers.js",
     "test": "vitest",
     "test:run": "vitest run",
     "test:security": "vitest run tests/security/",

@@ -6,7 +6,8 @@
 import { Worker } from 'bullmq'
 import { createClient } from '@supabase/supabase-js'
 import { writeEvent } from '../../events/event-log.js'
-import { addJob, redisConnection } from '../setup.js'
+import { redisConnection } from '../setup.js'
+import { runInboundLeadPlay } from '../../workflows/inbound-lead/graph.js'
 
 function getClient() {
   return createClient(process.env.SUPABASE_URL!, process.env.SUPABASE_SERVICE_KEY!)
@@ -80,13 +81,20 @@ export const inboundLeadWorker = new Worker(
         },
       })
 
-      // ── Enqueue enrichment ─────────────────────────────────────────────────
-      await addJob('advance-play-step', {
-        playId: play.id,
-        leadId: lead.id,
-        organizationId: orgId,
-        step: 'enrich',
+      // ── Run the inbound-lead play via LangGraph ────────────────────────────
+      const result = await runInboundLeadPlay(orgId, {
+        ...payload,
+        _leadId: lead.id,
+        _playInstanceId: play.id,
+        _workflowRunId: workflowRunId,
       })
+      
+      if (result.status === 'completed' || result.status === 'running') {
+        console.log(`[inbound-lead-worker] Play ${result.playInstanceId} status: ${result.status}`)
+      } else {
+        // Non-fatal: log the error but do not re-throw (worker must not crash)
+        console.error(`[inbound-lead-worker] Play ended with status: ${result.status}`)
+      }
 
     } catch (err) {
       // Emit failure event — never crash the worker silently
