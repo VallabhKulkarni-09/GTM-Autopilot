@@ -105,3 +105,6 @@ SUPABASE_SERVICE_KEY
 SLACK_WEBHOOK_URL           # optional — Slack notification on SLA breach
 DEFAULT_ORG_ID              # fallback org for HubSpot webhooks without portalId
 ```
+
+
+

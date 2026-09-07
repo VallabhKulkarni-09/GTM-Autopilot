@@ -36,6 +36,7 @@ export class QualificationAgent {
   readonly name = 'qualification-agent'
   readonly version = '1.0.0'
 
+  /** Primary API — used by the rule-based v1 pipeline */
   run(input: QualificationInput): ProposedAction {
     const params = scoreIcp(input.lead, input.company)
 
@@ -45,6 +46,11 @@ export class QualificationAgent {
       decisionRiskScore: 0.0,   // rule-based = deterministic = no risk
       rawConfidence: 1.0,
     }
+  }
+
+  /** Async execute() alias — compatible with LangGraph node interface */
+  async execute(input: QualificationInput, _context?: any): Promise<ProposedAction> {
+    return this.run(input)
   }
 }
 
