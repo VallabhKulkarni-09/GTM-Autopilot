@@ -26,6 +26,7 @@
   },
   "homepage": "https://github.com/VallabhKulkarni-09/GTM-Autopilot#readme",
   "dependencies": {
+    "@langchain/langgraph": "^1.4.14",
     "@supabase/supabase-js": "^2.109.0",
     "bullmq": "^6.3.4",
     "dotenv": "^17.4.2",
