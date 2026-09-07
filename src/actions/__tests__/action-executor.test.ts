@@ -11,19 +11,68 @@ import type { ProposedAction, ConnectorRegistry, DecisionSnapshot } from '../typ
 
 // ─── Mock Supabase ────────────────────────────────────────────────────────────
 
-const mockSelect = vi.fn()
-const mockUpdate = vi.fn()
+let idempotencyExists = false  // flip this to simulate a hit
 const mockSingle = vi.fn()
+
+/**
+ * Thenable proxy chain. Every method returns another chain.
+ * When awaited, resolves with the current mockDbResult.
+ * Special case: .single() calls the mockSingle fn.
+ */
+let mockDbResult: unknown = { data: [], error: null, count: 0 }
+
+function buildChain(): any {
+  const chain: any = {
+    then(resolve: (v: unknown) => unknown) {
+      return Promise.resolve(mockDbResult).then(resolve)
+    },
+    catch(reject: (e: unknown) => unknown) {
+      return Promise.resolve(mockDbResult).catch(reject)
+    },
+    single: mockSingle,
+  }
+  return new Proxy(chain, {
+    get(target, prop: string) {
+      if (prop in target) return target[prop]
+      return (..._args: unknown[]) => buildChain()
+    },
+  })
+}
 
 vi.mock('@supabase/supabase-js', () => ({
   createClient: () => ({
-    from: () => ({
-      select: mockSelect,
-      update: mockUpdate,
-      eq: () => ({ eq: () => ({ eq: () => ({ count: 0, error: null }), single: mockSingle, select: mockSelect }) }),
+    from: (table: string) => ({
+      select: (..._args: unknown[]) => {
+        // For idempotency check on action_execution_state table
+        if (table === 'action_execution_state') {
+          const count = idempotencyExists ? 1 : 0
+          return buildChainWith({ count, data: [], error: null })
+        }
+        return buildChain()
+      },
+      update: () => buildChain(),
+      insert: () => buildChain(),
     }),
   }),
 }))
+
+function buildChainWith(result: unknown): any {
+  const chain: any = {
+    then(resolve: (v: unknown) => unknown) {
+      return Promise.resolve(result).then(resolve)
+    },
+    catch(reject: (e: unknown) => unknown) {
+      return Promise.resolve(result).catch(reject)
+    },
+    single: mockSingle,
+  }
+  return new Proxy(chain, {
+    get(target, prop: string) {
+      if (prop in target) return target[prop]
+      return (..._args: unknown[]) => buildChainWith(result)
+    },
+  })
+}
 
 // ─── Mock writeEvent ──────────────────────────────────────────────────────────
 
@@ -31,6 +80,7 @@ const mockWriteEvent = vi.fn().mockResolvedValue({ id: 'evt_1' })
 vi.mock('../../events/event-log.js', () => ({
   writeEvent: (...args: unknown[]) => mockWriteEvent(...args),
 }))
+
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -85,18 +135,10 @@ const connectors: ConnectorRegistry = {
 describe('executeAction', () => {
   beforeEach(() => {
     vi.clearAllMocks()
-
-    // By default: idempotency check returns not-found
-    mockSelect.mockReturnValue({
-      eq: () => ({ eq: () => ({ count: 0, error: null }) }),
-      count: 0,
-      error: null,
-    })
-    mockUpdate.mockReturnValue({
-      eq: () => ({ eq: () => ({ error: null, data: null }) }),
-      error: null,
-    })
+    idempotencyExists = false
+    mockDbResult = { data: [], error: null, count: 0 }
     mockSingle.mockResolvedValue({ data: null, error: { message: 'not found' } })
+    mockWriteEvent.mockResolvedValue({ id: 'evt_1' })
   })
 
   it('qualify_lead: updates lead, emits started + succeeded events', async () => {
@@ -140,12 +182,7 @@ describe('executeAction', () => {
   })
 
   it('idempotency hit: emits deduplicated event, returns cached result', async () => {
-    // Simulate idempotency key already exists
-    mockSelect.mockReturnValueOnce({
-      eq: () => ({ eq: () => ({ count: 1, error: null }) }),
-      count: 1,
-      error: null,
-    })
+    idempotencyExists = true  // simulate key already exists
 
     const action = makeAction('qualify_lead', { is_icp_fit: true, icp_score: 80, icp_tier: 'tier_1' })
     const result = await executeAction(action, connectors, ORG_ID, WF_ID, PLAY_ID, snapshot)
