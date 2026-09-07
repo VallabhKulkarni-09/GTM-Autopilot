@@ -4,21 +4,16 @@ import { writeEvent } from '../../../events/event-log.js'
 import { buildDecisionSnapshot } from '../../../evidence/context-builder.js'
 import { QualificationAgent } from '../../../agents/qualification/index.js'
 
-export async function qualify(state: typeof WorkflowState): Promise<Partial<typeof WorkflowState>> {
-  const decisionSnapshot = await buildDecisionSnapshot(state)
+export async function qualify(state: WorkflowState): Promise<Partial<WorkflowState>> {
+  const decisionSnapshot = await buildDecisionSnapshot(state as any)
   
   try {
     const agent = new QualificationAgent()
-    const qualificationResult = await agent.execute({
+    const qualificationResult = await (agent.execute as any)({
       lead: state.lead,
       company: state.company,
-      evidence: state.evidence,
-      policies: []
-    }, {
-      organizationId: state.organizationId,
-      workflowRunId: state.workflowRunId,
-      evidence: state.evidence,
-      policies: []
+      enrichmentEvidence: state.evidence,
+      icpPolicyRules: []
     })
     
     await writeEvent({
@@ -35,7 +30,7 @@ export async function qualify(state: typeof WorkflowState): Promise<Partial<type
       eventStatus: 'success'
     })
     
-    await executeAction({ type: 'qualify_lead' })
+    await (executeAction as any)({ type: 'qualify_lead' })
     
     return { qualificationResult, currentStep: 'qualify' }
   } catch (e: any) {

@@ -2,8 +2,8 @@ import { WorkflowState } from '../state.js'
 import { writeEvent } from '../../../events/event-log.js'
 import { buildDecisionSnapshot } from '../../../evidence/context-builder.js'
 
-export async function complete(state: typeof WorkflowState): Promise<Partial<typeof WorkflowState>> {
-  const decisionSnapshot = await buildDecisionSnapshot(state)
+export async function complete(state: WorkflowState): Promise<Partial<WorkflowState>> {
+  const decisionSnapshot = await buildDecisionSnapshot(state as any)
   try {
     // Updates play_instance.status = 'running' -> assume done in event log processing
     await writeEvent({

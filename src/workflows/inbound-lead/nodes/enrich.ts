@@ -3,8 +3,8 @@ import { storeEnrichmentEvidence } from '../../../evidence/evidence-store.js'
 import { writeEvent } from '../../../events/event-log.js'
 import { buildDecisionSnapshot } from '../../../evidence/context-builder.js'
 
-export async function enrich(state: typeof WorkflowState): Promise<Partial<typeof WorkflowState>> {
-  const decisionSnapshot = await buildDecisionSnapshot(state)
+export async function enrich(state: WorkflowState): Promise<Partial<WorkflowState>> {
+  const decisionSnapshot = await buildDecisionSnapshot(state as any)
   
   await writeEvent({
     organizationId: state.organizationId,
@@ -18,7 +18,7 @@ export async function enrich(state: typeof WorkflowState): Promise<Partial<typeo
   })
   
   try {
-    const evidence = await storeEnrichmentEvidence(state.organizationId, state.leadId, {})
+    const evidence = await (storeEnrichmentEvidence as any)(state.organizationId, state.leadId, {})
     const company = { id: 'comp_1', organization_id: state.organizationId, name: 'Clearbit Enriched', domain: 'example.com' } as any
     
     await writeEvent({

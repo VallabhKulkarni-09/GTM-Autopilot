@@ -84,7 +84,7 @@ export async function runInboundLeadPlay(
     error: null
   }
   
-  await app.invoke(initialState, { configurable: { thread_id: workflowRunId } })
+  await app.invoke(initialState as any, { configurable: { thread_id: workflowRunId } })
   
   return { playInstanceId, status: 'running' }
 }

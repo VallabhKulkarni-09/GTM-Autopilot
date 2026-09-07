@@ -3,10 +3,10 @@ import { executeAction } from '../../../actions/executor.js'
 import { writeEvent } from '../../../events/event-log.js'
 import { buildDecisionSnapshot } from '../../../evidence/context-builder.js'
 
-export async function markDuplicate(state: typeof WorkflowState): Promise<Partial<typeof WorkflowState>> {
-  const decisionSnapshot = await buildDecisionSnapshot(state)
+export async function markDuplicate(state: WorkflowState): Promise<Partial<WorkflowState>> {
+  const decisionSnapshot = await buildDecisionSnapshot(state as any)
   try {
-    await executeAction({ type: 'mark_duplicate' })
+    await (executeAction as any)({ type: 'mark_duplicate' })
     await writeEvent({
       organizationId: state.organizationId,
       workflowRunId: state.workflowRunId,

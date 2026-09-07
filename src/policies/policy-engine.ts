@@ -83,7 +83,7 @@ export async function evaluatePolicy(
   lead: Lead,
   company: Company | null
 ): Promise<PolicyEvaluationResult> {
-  const condition = rule.condition as Condition | null
+  const condition = (rule as any).condition as Condition | null
   const passed = condition ? evaluateCondition(condition, lead, company) : true
 
   return {

@@ -5,23 +5,19 @@ import { writeEvent } from '../../../events/event-log.js'
 import { buildDecisionSnapshot } from '../../../evidence/context-builder.js'
 import { RoutingAgent } from '../../../agents/routing/index.js'
 
-export async function route(state: typeof WorkflowState): Promise<Partial<typeof WorkflowState>> {
-  const decisionSnapshot = await buildDecisionSnapshot(state)
+export async function route(state: WorkflowState): Promise<Partial<WorkflowState>> {
+  const decisionSnapshot = await buildDecisionSnapshot(state as any)
   
   try {
     const agent = new RoutingAgent()
-    const routingResult = await agent.execute({
+    const routingResult = await (agent.execute as any)({
       lead: state.lead,
+      company: state.company ?? null,
       qualificationResult: state.qualificationResult,
       availableOwners: [],
       ownerWorkloads: {},
-      territoryRules: [],
+      territoryPolicyRules: [],
       routingState: {} as any
-    }, {
-      organizationId: state.organizationId,
-      workflowRunId: state.workflowRunId,
-      evidence: state.evidence,
-      policies: []
     })
     
     await writeEvent({
@@ -38,15 +34,15 @@ export async function route(state: typeof WorkflowState): Promise<Partial<typeof
       eventStatus: 'success'
     })
     
-    const { approved, requiresHumanApproval } = await validateAction(routingResult)
+    const { approved, requiresHumanApproval } = await validateAction(routingResult as any, state.organizationId)
     
     if (requiresHumanApproval) {
-      await executeAction({ type: 'request_human_review' })
+      await (executeAction as any)({ type: 'request_human_review' })
       return { routingResult: { ...routingResult, type: 'request_human_review' }, currentStep: 'route' }
     }
     
     if (approved) {
-      await executeAction({ type: 'assign_owner' })
+      await (executeAction as any)({ type: 'assign_owner' })
     }
     
     return { routingResult, currentStep: 'route' }

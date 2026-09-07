@@ -3,9 +3,9 @@ import { leadRepo } from '../../../repositories/lead.repo.js'
 import { writeEvent } from '../../../events/event-log.js'
 import { buildDecisionSnapshot } from '../../../evidence/context-builder.js'
 
-export async function validate(state: typeof WorkflowState): Promise<Partial<typeof WorkflowState>> {
+export async function validate(state: WorkflowState): Promise<Partial<WorkflowState>> {
   const isDup = await leadRepo.isDuplicate(state.organizationId, state.lead.email)
-  const decisionSnapshot = await buildDecisionSnapshot(state)
+  const decisionSnapshot = await buildDecisionSnapshot(state as any)
   
   if (isDup) {
     const updatedLead = { ...state.lead, is_duplicate: true } as any

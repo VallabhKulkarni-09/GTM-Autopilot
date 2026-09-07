@@ -46,13 +46,17 @@ export async function addJob(
 // Runs every 2 minutes. Called once at startup.
 
 export async function registerSlaTimer(): Promise<void> {
-  await slaTimerQueue.add(
+  // BullMQ v5+: use upsertJobScheduler for repeatable jobs
+  await slaTimerQueue.upsertJobScheduler(
     'sla-check',
-    { trigger: 'scheduled' },
+    { every: 2 * 60 * 1000 },
     {
-      repeat: { every: 2 * 60 * 1000 },
-      removeOnComplete: 10,
-      removeOnFail: 50,
+      name: 'sla-check',
+      data: { trigger: 'scheduled' },
+      opts: {
+        removeOnComplete: 10,
+        removeOnFail: 50,
+      },
     }
   )
 }

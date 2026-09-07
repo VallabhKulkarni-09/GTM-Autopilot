@@ -3,10 +3,10 @@ import { executeAction } from '../../../actions/executor.js'
 import { writeEvent } from '../../../events/event-log.js'
 import { buildDecisionSnapshot } from '../../../evidence/context-builder.js'
 
-export async function markNurture(state: typeof WorkflowState): Promise<Partial<typeof WorkflowState>> {
-  const decisionSnapshot = await buildDecisionSnapshot(state)
+export async function markNurture(state: WorkflowState): Promise<Partial<WorkflowState>> {
+  const decisionSnapshot = await buildDecisionSnapshot(state as any)
   try {
-    await executeAction({ type: 'mark_nurture' })
+    await (executeAction as any)({ type: 'mark_nurture' })
     await writeEvent({
       organizationId: state.organizationId,
       workflowRunId: state.workflowRunId,

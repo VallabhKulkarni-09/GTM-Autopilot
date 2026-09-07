@@ -12,8 +12,8 @@
  */
 
 import { createClient } from '@supabase/supabase-js'
-import { writeEvent } from '../events/event-log.js'
-import { addJob } from './setup.js'
+import { writeEvent } from '../../events/event-log.js'
+import { addJob } from '../setup.js'
 
 function getClient() {
   return createClient(process.env.SUPABASE_URL!, process.env.SUPABASE_SERVICE_KEY!)

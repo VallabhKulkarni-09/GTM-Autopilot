@@ -24,7 +24,7 @@ function evaluateTerritoryRules(
   const country = ((input.company?.country ?? (input.lead as any)?.country) ?? '').toUpperCase().trim()
 
   for (const rule of input.territoryPolicyRules) {
-    const cond = rule.condition as any
+    const cond = ((rule as any).condition) as any
     if (!cond) continue
 
     // Simple territory match: condition.field = 'country', operator = 'in'
@@ -32,8 +32,8 @@ function evaluateTerritoryRules(
       const values = (cond.values ?? []).map((v: string) => v.toUpperCase())
       if (values.includes(country) || values.includes('*')) {
         return {
-          queueName: (rule.parameters as any)?.queue_name ?? 'default',
-          ownerIds: (rule.parameters as any)?.owner_ids ?? null,
+          queueName: (((rule as any).parameters) as any)?.queue_name ?? 'default',
+          ownerIds: (((rule as any).parameters) as any)?.owner_ids ?? null,
         }
       }
     }
@@ -41,7 +41,7 @@ function evaluateTerritoryRules(
     // Wildcard / catch-all
     if (cond.operator === 'wildcard' || cond.operator === 'all') {
       return {
-        queueName: (rule.parameters as any)?.queue_name ?? 'default',
+        queueName: (((rule as any).parameters) as any)?.queue_name ?? 'default',
         ownerIds: null,
       }
     }
@@ -84,7 +84,7 @@ export function computeRouting(input: RoutingInput): RoutingParameters | null {
   const minLoad = input.ownerWorkloads[eligible[0].Id] ?? 0
   const tied = eligible.filter(o => (input.ownerWorkloads[o.Id] ?? 0) === minLoad)
 
-  const currentIndex = input.routingState.current_index ?? 0
+  const currentIndex = (input.routingState as any).current_index ?? input.routingState.counter ?? 0
   const roundRobinIndex = currentIndex % tied.length
   const selected = tied[roundRobinIndex]
 

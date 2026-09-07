@@ -5,7 +5,8 @@
  */
 
 import { computeRouting } from './rules.js'
-import type { RoutingInput, ProposedAction } from '../qualification/types.js'
+import type { RoutingInput } from './types.js'
+import type { ProposedAction } from '../qualification/types.js'
 
 export class RoutingAgent {
   readonly name = 'routing-agent'

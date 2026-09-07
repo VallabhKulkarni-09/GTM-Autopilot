@@ -3,10 +3,10 @@ import { executeAction } from '../../../actions/executor.js'
 import { writeEvent } from '../../../events/event-log.js'
 import { buildDecisionSnapshot } from '../../../evidence/context-builder.js'
 
-export async function firstTouch(state: typeof WorkflowState): Promise<Partial<typeof WorkflowState>> {
-  const decisionSnapshot = await buildDecisionSnapshot(state)
+export async function firstTouch(state: WorkflowState): Promise<Partial<WorkflowState>> {
+  const decisionSnapshot = await buildDecisionSnapshot(state as any)
   try {
-    await executeAction({ type: 'start_sequence' })
+    await (executeAction as any)({ type: 'start_sequence' })
     return { currentStep: 'first_touch' }
   } catch (e: any) {
     await writeEvent({

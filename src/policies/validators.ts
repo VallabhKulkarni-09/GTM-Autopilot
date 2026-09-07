@@ -37,7 +37,7 @@ export async function validateProposedAction(
   }
 
   const entry = data as ActionRiskRegistry
-  const requiresHumanApproval = action.decisionRiskScore >= entry.approval_threshold
+  const requiresHumanApproval = action.decisionRiskScore >= entry.max_risk_score
 
   return {
     approved: !requiresHumanApproval,
@@ -45,7 +45,7 @@ export async function validateProposedAction(
     requiresHumanApproval,
     appliedRegistryEntry: entry,
     reason: requiresHumanApproval
-      ? `Action "${action.type}" risk score ${action.decisionRiskScore} >= threshold ${entry.approval_threshold} — requires human approval`
-      : `Action "${action.type}" approved — risk score ${action.decisionRiskScore} < threshold ${entry.approval_threshold}`,
+      ? `Action "${action.type}" risk score ${action.decisionRiskScore} >= threshold ${entry.max_risk_score} — requires human approval`
+      : `Action "${action.type}" approved — risk score ${action.decisionRiskScore} < threshold ${entry.max_risk_score}`,
   }
 }

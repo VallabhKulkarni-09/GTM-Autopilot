@@ -77,7 +77,7 @@ export const escalateWorker = new Worker(
       leadId:          play.lead_id,
       eventType:       'escalation_sent',
       actorType:       'sla_timer',
-      eventStatus:     slackSent ? 'success' : 'failure',
+      eventStatus:     slackSent ? 'success' : 'failed',
       errorCode:       !slackSent ? 'SLACK_SEND_FAILED' : undefined,
       errorMessage:    !slackSent ? 'Slack webhook returned non-200' : undefined,
       decisionSnapshot: {
