@@ -1,110 +1,145 @@
-# PROGRESS.md — GTM Autopilot
-
-> Append-only log. Each session adds a block. Never edit past entries.
-
----
-
-## Session 1 — Schema + Types (Completed)
-
-**Goal:** Deploy all 13 tables to Supabase, generate TypeScript types.
-
-**Completed:**
-- ✅ Applied all 13 table migrations to Supabase (organizations → routing_state)
-- ✅ All tables include organization_id (Rule #1)
-- ✅ event_log verified immutable in schema (no UPDATE/DELETE triggers)
-- ✅ Generated `src/domain/db-types.ts` from live schema
-- ✅ Merged to main
+# GTM Autopilot — PROGRESS.md
+_Last updated: 2026-09-07_
 
 ---
 
-## Session 2 — Connectors + Infrastructure (Completed)
-
-**Goal:** Build 4 connectors, tenant middleware, event system.
-
-**Completed — 6 branches built and merged to main:**
-
-| Branch | Files | Tests |
-|--------|-------|-------|
-| `feat/connector-salesforce` | salesforce.connector.ts, types, errors | 9 tests (credential-gated) |
-| `feat/connector-hubspot` | hubspot.connector.ts, types, errors | 12 tests (5 skipped) |
-| `feat/connector-outreach` | outreach.connector.ts, types, errors | 7 tests (credential-gated) |
-| `feat/connector-clearbit` | clearbit.connector.ts, types, errors | 9 tests (4 skipped) |
-| `feat/tenant-middleware` | tenant-context.ts, types.ts | 11 security tests |
-| `feat/event-system` | event-log.ts, event-processor.ts, event.types.ts, repository | 10 unit tests |
-
-**Key contracts enforced:**
-- Every connector: `ConnectorError` only, `withRetry` on 429/503, `idempotencyKey` param
-- HubSpot: `verifyWebhookSignature` is **sync** (crypto.createHmac)
-- Clearbit: returns `null` on 404/202, throws `ConnectorError` only on 5xx
-- Tenant middleware: `organization_id` from JWT only — never body/query/params
-- Event log: throws before DB write if `decisionSnapshot` is null
-- Cross-tenant: all 11 security tests return 404 (not 403)
-
----
-
-## Session 3 — Agent Layer (In Progress)
-
-**Goal:** Build 5 service layers — Qualification, Routing, Policy Engine, Webhook Receiver, SLA Timer.
-
-**Status: 5 branches built and pushed — awaiting PR review + merge**
-
-| Branch | Files | Tests | Status |
-|--------|-------|-------|--------|
-| `feat/qualification-agent` | qualification/index.ts, rules.ts, types.ts | 10 unit tests ✅ | Pushed |
-| `feat/routing-agent` | routing/index.ts, rules.ts, types.ts | 10 unit tests ✅ | Pushed |
-| `feat/policy-engine` | policy-engine.ts, validators.ts, types.ts | 8 unit tests ✅ | Pushed |
-| `feat/webhook-receiver` | app.ts, server.ts, routes/webhooks.ts, routes/api/* | (integration) | Pushed |
-| `feat/sla-timer` | queue/setup.ts, jobs/sla-timer.ts, workers/* | (integration) | Pushed |
-
-**Test Results (current main + all merged):**
-```
-Test Files: 7 passed | 2 skipped (9)
-Tests:      61 passed | 25 skipped (86)
-Skipped:    credential-gated (Salesforce, Outreach live tests)
-```
-
-**Key contracts enforced:**
-- QualificationAgent: score 0–100, tier_1/tier_2/not_icp, reason_codes[]
-- RoutingAgent: territory → workload (max 25) → round-robin via routing_state
-- PolicyEngine: 9 operators (in/not_in/eq/neq/gte/lte/contains/and/or)
-- Webhook: HMAC first → idempotency → BullMQ → 200 within 200ms
-- SLA timer: form_submitted_at deadline ALWAYS (detects + skips created_at-based deadlines)
-- Escalation: Slack fails → event still written (never crash on Slack)
-
----
-
-## What's Left
+## Current State
 
 ```
-⬜ PR review + merge (5 branches above)
-⬜ Action executor (Salesforce assign + Outreach enroll)
-⬜ LangGraph workflow (connects agent pipeline)
-⬜ Evidence store + context builder
-⬜ Dashboard (Next.js 15)
-⬜ End-to-end play test
+✅ Schema (migrations 001–013)
+✅ Domain types (src/domain/db-types.ts)
+✅ 4 connectors: Salesforce, HubSpot, Outreach, Clearbit
+✅ Tenant context middleware
+✅ Event system (event-log + event-processor)
+✅ Qualification agent v1 (rule-based, 10 tests)
+✅ Routing agent v1 (rule-based, 10 tests)
+✅ Policy engine (9 operators, risk registry, validators)
+✅ Webhook receiver (HMAC → idempotency → BullMQ → 200ms)
+✅ SLA timer + escalation worker
+✅ Action executor (idempotency, try/finally event guarantee, 5 tests)
+✅ Evidence store (Clearbit → evidence rows, 30-day expiry, 5 tests)
+✅ Context builder (DecisionSnapshot assembly, 2 tests)
+✅ LangGraph inbound-lead workflow (4 paths tested)
+✅ Dashboard (Next.js 15, 4 pages: overview / leads / lead detail / settings)
+```
+
+**Test suite: 75 passing | 0 failing | 25 skipped (live credentials)**
+
+---
+
+## What Was Built This Session
+
+### Wave 3 — PR Reviews + Merges (all APPROVED ✅)
+| PR | Key findings |
+|---|---|
+| `feat/qualification-agent` | All 9 checks pass — null-safe, exact 0.0/1.0 risk/confidence, SCREAMING_SNAKE_CASE |
+| `feat/routing-agent` | Territory-first ordering correct, `>= 25` cap (not `> 25`), no-match → `request_human_review` |
+| `feat/policy-engine` | All 9 operators, recursive and/or, loads from DB table (not hardcoded) |
+| `feat/webhook-receiver` | HMAC first, idempotency via eventId, duplicate → 200 no-enqueue, tenant middleware `/api/*` only |
+| `feat/sla-timer` | `form_submitted_at` verified, event before DB update, escalation priority 1, Slack failure doesn't crash |
+
+### Wave 4 — 4 Parallel Builds (all complete ✅)
+| Agent | Branch | Files | Tests |
+|---|---|---|---|
+| action-executor | `feat/action-executor` | `action-executor.ts`, `action-registry.ts`, `action-validator.ts`, `types.ts` | 5/5 pass |
+| evidence-store | `feat/evidence-store` | `evidence-store.ts`, `context-builder.ts` | 5/5 pass |
+| langgraph-workflow | `feat/langgraph-workflow` | `graph.ts`, `state.ts`, 8 nodes | 4/4 pass |
+| dashboard | `feat/dashboard` | 4 pages (overview, leads, lead detail, settings) | TS clean |
+
+---
+
+## Architecture Now (complete)
+
+```
+HubSpot webhook
+    ↓ HMAC verify + idempotency (webhooks.ts)
+    ↓ BullMQ enqueue (inbound-lead.worker.ts)
+    ↓
+LangGraph: runInboundLeadPlay()
+    ↓
+[validate]  → dedup check via leadRepo
+    ↓
+[enrich]    → Clearbit → storeEnrichmentEvidence()
+    ↓
+[qualify]   → QualificationAgent v1 → ActionExecutor (qualify_lead)
+    ↓
+[route]     → RoutingAgent v1 → validateAction → ActionExecutor (assign_owner)
+    ↓
+[first_touch] → ActionExecutor (start_sequence → Outreach)
+    ↓
+[complete]  → play_instance.status = 'running'
+    ↓
+SLA timer (every 2 min) → breach? → escalate → Slack
+
+Every step → writeEvent() with DecisionSnapshot (immutable event_log)
 ```
 
 ---
 
-## Environment Variables Required
+## Files Added This Session
 
 ```
-# Connectors (skip tests until added)
-SF_CLIENT_ID, SF_CLIENT_SECRET, SF_INSTANCE_URL, SF_SANDBOX
-HUBSPOT_API_KEY, HUBSPOT_WEBHOOK_SECRET
-OUTREACH_API_KEY
-CLEARBIT_API_KEY
+src/actions/
+  action-executor.ts      — full pipeline with try/finally event guarantee
+  action-registry.ts      — ActionType → human label map (for dashboard)
+  action-validator.ts     — thin wrapper around policy validators
+  action-executor.ts      — executor re-export alias
+  validator.ts            — validator re-export alias
+  types.ts                — ProposedAction, ActionExecutionResult, ConnectorError
 
-# Infrastructure (required to run)
-JWT_SECRET                  # min 32 chars
-REDIS_URL                   # BullMQ
-SUPABASE_URL
-SUPABASE_SERVICE_KEY
+src/evidence/
+  evidence-store.ts       — Clearbit → evidence rows (0.9 confidence, 30-day expiry)
+  context-builder.ts      — DecisionSnapshot assembly (throws if lead not found)
 
-# Escalation
-SLACK_WEBHOOK_URL           # optional — Slack notification on SLA breach
-DEFAULT_ORG_ID              # fallback org for HubSpot webhooks without portalId
+src/repositories/
+  lead.repo.ts            — leadRepo with isDuplicate, getByEmail, update, list
+
+src/agents/
+  qualification/index.ts  — QualificationAgent v1 (run + execute alias)
+  routing/index.ts        — RoutingAgent v1 (run + execute alias)
+
+src/workflows/inbound-lead/
+  state.ts                — WorkflowState type
+  graph.ts                — LangGraph StateGraph, runInboundLeadPlay()
+  nodes/validate.ts       — dedup check
+  nodes/enrich.ts         — Clearbit enrichment
+  nodes/qualify.ts        — QualificationAgent execution
+  nodes/route.ts          — RoutingAgent + validateAction + executeAction
+  nodes/first-touch.ts    — Outreach enrollment
+  nodes/mark-duplicate.ts — duplicate terminal state
+  nodes/mark-nurture.ts   — nurture terminal state
+  nodes/complete.ts       — play complete
+
+dashboard/app/
+  dashboard/page.tsx      — overview metrics + speed-to-lead chart
+  leads/page.tsx          — paginated lead list with stage filters
+  leads/[id]/page.tsx     — event timeline (the audit trail view)
+  settings/page.tsx       — connector health + SLA config + routing rules
 ```
 
+---
 
+## What Remains
 
+```
+[ ] End-to-end play test
+      — Wire up inbound-lead.worker.ts to call runInboundLeadPlay()
+      — Set real env vars (SUPABASE_URL, HUBSPOT_*, SALESFORCE_*, OUTREACH_*, CLEARBIT_*)
+      — Submit one real HubSpot form → watch the play run
+
+[ ] Production deploy
+      — Railway: deploy Fastify API + BullMQ workers
+      — Vercel: deploy dashboard/ (set NEXT_PUBLIC_API_URL + DASHBOARD_JWT)
+      — Verify /api/metrics/overview returns real data
+
+[ ] Design partner sandbox goes live
+```
+
+---
+
+## Test Count History
+| Session | Tests |
+|---|---|
+| After wave 1+2 merge | 33 passing |
+| After wave 3 merge (5 PRs) | 61 passing |
+| After wave 4 merge | **75 passing** |
