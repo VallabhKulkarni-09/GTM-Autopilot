@@ -26,20 +26,17 @@ export default async function SettingsPage() {
     
     connectors = await connRes.json()
     policies = await polRes.json()
-  } catch (error) {
-    // Mock data
-    connectors = [
-      { name: 'Salesforce', status: 'healthy', lastChecked: new Date().toISOString() },
-      { name: 'HubSpot', status: 'healthy', lastChecked: new Date().toISOString() },
-      { name: 'Outreach', status: 'degraded', lastChecked: new Date(Date.now() - 300000).toISOString() },
-      { name: 'Clearbit', status: 'healthy', lastChecked: new Date().toISOString() },
-    ]
-    policies = [
-      { id: '1', rule_type: 'sla', name: 'Standard SLA', conditions_summary: 'All leads', sla_minutes: 15 },
-      { id: '2', rule_type: 'territory', name: 'US West', conditions_summary: 'State in (CA, OR, WA, NV)', queue_assigned: 'us_west_sdr' },
-      { id: '3', rule_type: 'territory', name: 'EMEA', conditions_summary: 'Country in (UK, FR, DE)', queue_assigned: 'emea_sdr' },
-      { id: '4', rule_type: 'escalation', name: 'Manager Alert', conditions_summary: 'SLA Breached', queue_assigned: 'manager_slack_channel' }
-    ]
+  } catch (error: any) {
+    const errMsg = error?.message ?? 'Failed to load settings'
+    return (
+      <div className="p-8">
+        <div className="rounded-lg border border-red-200 bg-red-50 p-6 text-red-800">
+          <h2 className="font-semibold text-lg mb-2">⚠️ Settings Unavailable</h2>
+          <p className="text-sm">{errMsg}</p>
+          <p className="text-xs mt-2 text-red-600">Check API server health and connector configuration.</p>
+        </div>
+      </div>
+    )
   }
 
   const slaPolicy = policies.find(p => p.rule_type === 'sla')

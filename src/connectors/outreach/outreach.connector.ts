@@ -25,7 +25,7 @@ export class OutreachConnector implements Connector<OutreachConfig> {
   async healthCheck(): Promise<ConnectorHealth> {
     const start = Date.now()
     try {
-      const res = await fetch(`${OR_BASE}/sequences?page[size]=1`, { headers: this.headers() })
+      const res = await fetch(`${OR_BASE}/sequences?page[size]=1`, { headers: this.headers(), signal: AbortSignal.timeout(8_000) })
       if (!res.ok) throw new Error(`Status ${res.status}`)
       return { ok: true, latencyMs: Date.now() - start, lastChecked: new Date() }
     } catch (err) {

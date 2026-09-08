@@ -21,7 +21,6 @@ export async function webhookRoutes(app: FastifyInstance) {
   app.post(
     '/hubspot',
     {
-      config: { rawBody: true },
       schema: {
         body: {
           type: 'object',

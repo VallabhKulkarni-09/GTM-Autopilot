@@ -34,6 +34,24 @@ function matchesAny(haystack: string, needles: string[]): boolean {
 }
 
 export function scoreIcp(lead: Lead, company: Company | null): QualificationParameters {
+  // ── Hard gate: free/disposable email providers ─────────────────────────────
+  const FREE_EMAIL_PROVIDERS = new Set([
+    'gmail.com', 'yahoo.com', 'hotmail.com', 'outlook.com', 'icloud.com',
+    'aol.com', 'protonmail.com', 'proton.me', 'mail.com', 'zoho.com',
+    'yandex.com', 'yandex.ru', 'tutanota.com', 'fastmail.com',
+    'inbox.com', 'live.com', 'msn.com', 'me.com', 'mac.com',
+  ])
+
+  const emailDomain = lead.email?.split('@')[1]?.toLowerCase().trim()
+  if (emailDomain && FREE_EMAIL_PROVIDERS.has(emailDomain)) {
+    return {
+      is_icp_fit: false,
+      icp_score: 0,
+      icp_tier: 'not_icp' as const,
+      reason_codes: ['DISQUALIFIED_FREE_EMAIL_PROVIDER'],
+    }
+  }
+
   let score = 0
   const reason_codes: string[] = []
 

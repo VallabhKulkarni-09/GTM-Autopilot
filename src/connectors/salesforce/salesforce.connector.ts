@@ -20,6 +20,15 @@ import type {
   UserFilter,
 } from './salesforce.types.js'
 
+export type AccountMatch = {
+  accountId: string
+  accountOwnerId: string
+  accountOwnerName: string
+  openOpportunityId: string | null
+  openOpportunityOwnerId: string | null
+  openOpportunityOwnerName: string | null
+}
+
 export class SalesforceConnector implements Connector<SalesforceConfig> {
   readonly name = 'salesforce' as const
   readonly version = '1.0.0'
@@ -60,6 +69,7 @@ export class SalesforceConnector implements Connector<SalesforceConfig> {
       const fields = 'Id,FirstName,LastName,Email,Title,Phone,Company,LeadSource,Status,OwnerId,CreatedDate,LastModifiedDate'
       const res = await fetch(`${this.config!.instanceUrl}/services/data/v59.0/sobjects/Lead/${id}?fields=${fields}`, {
         headers: { Authorization: `Bearer ${token}` },
+        signal: AbortSignal.timeout(8_000),
       })
       if (res.status === 404) {
         throw new ConnectorError(this.name, SalesforceErrorCode.LEAD_NOT_FOUND, 404, await res.text(), `Lead ${id} not found in Salesforce`)
@@ -89,6 +99,7 @@ export class SalesforceConnector implements Connector<SalesforceConfig> {
         method: 'POST',
         headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
         body: JSON.stringify(body),
+        signal: AbortSignal.timeout(8_000),
       })
       if (!res.ok) {
         const raw = await res.text()
@@ -112,6 +123,7 @@ export class SalesforceConnector implements Connector<SalesforceConfig> {
         method: 'PATCH',
         headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
         body: JSON.stringify(body),
+        signal: AbortSignal.timeout(8_000),
       })
       if (res.status === 404) {
         throw new ConnectorError(this.name, SalesforceErrorCode.LEAD_NOT_FOUND, 404, '', `Lead ${id} not found`)
@@ -130,6 +142,7 @@ export class SalesforceConnector implements Connector<SalesforceConfig> {
         method: 'PATCH',
         headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
         body: JSON.stringify({ OwnerId: ownerId, Description: `idempotency_key:${idempotencyKey}` }),
+        signal: AbortSignal.timeout(8_000),
       })
       if (res.status === 404) {
         throw new ConnectorError(this.name, SalesforceErrorCode.LEAD_NOT_FOUND, 404, '', `Lead ${leadId} not found`)
@@ -156,6 +169,7 @@ export class SalesforceConnector implements Connector<SalesforceConfig> {
         method: 'POST',
         headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
         body: JSON.stringify(body),
+        signal: AbortSignal.timeout(8_000),
       })
       if (!res.ok) {
         const raw = await res.text()
@@ -165,7 +179,7 @@ export class SalesforceConnector implements Connector<SalesforceConfig> {
       // Fetch the created task
       const taskRes = await fetch(
         `${this.config!.instanceUrl}/services/data/v59.0/sobjects/Task/${created.id}`,
-        { headers: { Authorization: `Bearer ${token}` } }
+        { headers: { Authorization: `Bearer ${token}` }, signal: AbortSignal.timeout(8_000) }
       )
       return taskRes.json() as Promise<SalesforceTask>
     })
@@ -184,6 +198,48 @@ export class SalesforceConnector implements Connector<SalesforceConfig> {
     })
   }
 
+  async matchAccountByDomain(
+    domain: string,
+    idempotencyKey: string
+  ): Promise<AccountMatch | null> {
+    return withRetry(this.name, 'ACCOUNT_MATCH_FAILED', async () => {
+      const token = await this.getValidToken()
+      const soql = [
+        'SELECT Id, OwnerId, Owner.Name,',
+        '  (SELECT Id, StageName, OwnerId, Owner.Name FROM Opportunities WHERE IsClosed = false ORDER BY CreatedDate DESC LIMIT 1)',
+        'FROM Account',
+        `WHERE Website LIKE '%${domain}%' OR Website LIKE '%${domain.replace(/^www\./, '')}%'`,
+        'LIMIT 1',
+      ].join(' ')
+
+      const url = `${this.config!.instanceUrl}/services/data/v59.0/query?q=${encodeURIComponent(soql)}`
+      const res = await fetch(url, {
+        method: 'GET',
+        headers: { Authorization: `Bearer ${token}` },
+        signal: AbortSignal.timeout(8_000),
+      })
+      if (!res.ok) {
+        const raw = await res.text()
+        throw new ConnectorError(this.name, 'ACCOUNT_MATCH_FAILED', res.status, raw, `matchAccountByDomain failed for domain ${domain}`)
+      }
+      const raw = await res.json() as { records: any[]; totalSize: number }
+
+      if (!raw.records || raw.records.length === 0) return null
+
+      const account = raw.records[0]
+      const opp = account?.Opportunities?.records?.[0] ?? null
+
+      return {
+        accountId: account.Id,
+        accountOwnerId: account.OwnerId,
+        accountOwnerName: account.Owner?.Name ?? 'Unknown',
+        openOpportunityId: opp?.Id ?? null,
+        openOpportunityOwnerId: opp?.OwnerId ?? null,
+        openOpportunityOwnerName: opp?.Owner?.Name ?? null,
+      }
+    })
+  }
+
   // ─── Private Helpers ────────────────────────────────────────────────────────
 
   private async query<T>(soql: string, encode = true): Promise<T[]> {
@@ -191,6 +247,7 @@ export class SalesforceConnector implements Connector<SalesforceConfig> {
     const q = encode ? encodeURIComponent(soql) : soql
     const res = await fetch(`${this.config!.instanceUrl}/services/data/v59.0/query?q=${q}`, {
       headers: { Authorization: `Bearer ${token}` },
+      signal: AbortSignal.timeout(8_000),
     })
     if (!res.ok) {
       const raw = await res.text()
@@ -221,6 +278,7 @@ export class SalesforceConnector implements Connector<SalesforceConfig> {
       method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
       body: body.toString(),
+      signal: AbortSignal.timeout(8_000),
     })
 
     if (!res.ok) {

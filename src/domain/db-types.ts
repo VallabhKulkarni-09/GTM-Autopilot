@@ -1,7 +1,7 @@
 /**
  * db-types.ts
  * TypeScript types generated from the GTM Autopilot database schema.
- * Source: db/migrations/001–013
+ * Source: db/migrations/001–014
  *
  * These are the canonical entity shapes used across the entire application.
  * Never manually define a type that should come from the schema.
@@ -92,6 +92,10 @@ export type EventType =
   | 'play_resumed'
   | 'play_marked_nurture'
   | 'play_marked_duplicate'
+  // Account matching (before qualification)
+  | 'account_match_no_match'
+  | 'account_match_found'
+  | 'account_match_error'
 
 export type ActorType = 'agent' | 'human' | 'system' | 'sla_timer' | 'webhook'
 
@@ -133,6 +137,11 @@ export type Lead = {
   form_submitted_at: string       // ISO timestamp — SLA clock starts here
   source: string
   raw_payload: Record<string, unknown> | null
+  // Qualification fields (added in migration 014)
+  is_duplicate: boolean              // true = lead matched an existing email in this org
+  is_icp_fit: boolean | null         // null = not yet qualified
+  icp_score: number | null           // 0–100
+  icp_tier: 'tier_1' | 'tier_2' | 'not_icp' | null
   created_at: string
   updated_at: string
 }

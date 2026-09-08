@@ -4,7 +4,7 @@ import { writeEvent } from '../../../events/event-log.js'
 import { buildDecisionSnapshot } from '../../../evidence/context-builder.js'
 
 export async function validate(state: WorkflowState): Promise<Partial<WorkflowState>> {
-  const isDup = await leadRepo.isDuplicate(state.organizationId, state.lead.email)
+  const isDup = await leadRepo.isDuplicate(state.organizationId, state.lead.email, state.leadId)
   const decisionSnapshot = await buildDecisionSnapshot(state as any)
   
   if (isDup) {

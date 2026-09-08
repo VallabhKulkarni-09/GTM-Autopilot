@@ -70,7 +70,18 @@ export async function withRetry<T>(
   for (let attempt = 0; attempt < RETRY_CONFIG.maxAttempts; attempt++) {
     try {
       return await fn()
-    } catch (err) {
+    } catch (err: any) {
+      // AbortError / TimeoutError — thrown by AbortSignal.timeout(); never retry
+      if (err?.name === 'AbortError' || err?.name === 'TimeoutError') {
+        throw new ConnectorError(
+          source,
+          'TIMEOUT',
+          408,
+          { message: `Request timed out after 8s` },
+          `Request timed out after 8s`
+        )
+      }
+
       if (err instanceof ConnectorError) {
         if ((RETRY_CONFIG.noRetryOn as readonly number[]).includes(err.statusCode)) {
           throw err

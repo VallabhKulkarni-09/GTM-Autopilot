@@ -7,41 +7,38 @@ import { SdrTable } from './sdr-table'
 export default async function DashboardPage() {
   let overview: OverviewMetrics
   let distribution: SpeedToLeadDistribution
-  
+  let apiError: string | null = null
+
   try {
     const token = getServerToken()
     const [overviewRes, distRes] = await Promise.all([
       apiFetch('/api/metrics/overview', token),
       apiFetch('/api/metrics/speed-to-lead', token)
     ])
-    
-    if (!overviewRes.ok || !distRes.ok) throw new Error('Failed to fetch data')
-    
+
+    if (!overviewRes.ok || !distRes.ok) {
+      throw new Error(`API error: overview=${overviewRes.status} dist=${distRes.status}`)
+    }
+
     overview = await overviewRes.json()
     distribution = await distRes.json()
-  } catch (error) {
-    // Mock data if API fails to allow UI building without backend
-    overview = {
-      currentPeriod: { touchedUnder15MinPct: 85, avgFirstTouchMin: 12, slaBreaches: 4, activePlays: 23, meetingsBooked: 22, totalQualified: 100 },
-      priorPeriod: { touchedUnder15MinPct: 75, meetingsBooked: 15, totalQualified: 100 }
-    }
-    distribution = {
-      buckets: {
-        under5: { count: 50, pct: 50 },
-        under15: { count: 35, pct: 35 },
-        under30: { count: 10, pct: 10 },
-        under60: { count: 3, pct: 3 },
-        over60: { count: 2, pct: 2 },
-      },
-      sdrStats: [
-        { name: 'Alice', medianFirstTouchMin: 8, under15MinPct: 90, meetingsBooked: 10 },
-        { name: 'Bob', medianFirstTouchMin: 18, under15MinPct: 40, meetingsBooked: 5 },
-      ]
-    }
+  } catch (error: any) {
+    apiError = error?.message ?? 'Failed to load dashboard data'
+    return (
+      <div className="p-8">
+        <div className="rounded-lg border border-red-200 bg-red-50 p-6 text-red-800">
+          <h2 className="font-semibold text-lg mb-2">⚠️ Dashboard Unavailable</h2>
+          <p className="text-sm">{apiError}</p>
+          <p className="text-xs mt-2 text-red-600">Check API server health and network connectivity.</p>
+        </div>
+      </div>
+    )
   }
 
   const delta = overview.currentPeriod.meetingsBooked - overview.priorPeriod.meetingsBooked;
-  const pctChange = Math.round((delta / overview.priorPeriod.meetingsBooked) * 100);
+  const pctChange = overview.priorPeriod.meetingsBooked > 0
+    ? Math.round((delta / overview.priorPeriod.meetingsBooked) * 100)
+    : 0;
 
   return (
     <div className="space-y-8">

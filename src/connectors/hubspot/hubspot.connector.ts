@@ -22,7 +22,7 @@ export class HubSpotConnector implements Connector<HubSpotConfig> {
   async healthCheck(): Promise<ConnectorHealth> {
     const start = Date.now()
     try {
-      const res = await fetch(`${HS_BASE}/crm/v3/objects/contacts?limit=1`, { headers: this.headers() })
+      const res = await fetch(`${HS_BASE}/crm/v3/objects/contacts?limit=1`, { headers: this.headers(), signal: AbortSignal.timeout(8_000) })
       if (!res.ok) throw new Error(`Status ${res.status}`)
       return { ok: true, latencyMs: Date.now() - start, lastChecked: new Date() }
     } catch (err) {

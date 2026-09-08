@@ -7,22 +7,19 @@
  * - NEVER updates. NEVER deletes.
  * - decisionSnapshot REQUIRED — throws before DB write if missing/null
  * - All writes go through this function — never raw DB inserts elsewhere
+ * - After every insert, processEvent() is called to project into action_execution_state
+ *   so the idempotency check in ActionExecutor always has current data.
  */
 
-import { createClient } from '@supabase/supabase-js'
+import { getDb } from '../db/client.js'
+import { processEvent } from './event-processor.js'
 import type { WriteEventInput, EventLogRow } from './event.types.js'
-
-function getSupabaseClient() {
-  const url = process.env.SUPABASE_URL
-  const key = process.env.SUPABASE_SERVICE_KEY
-  if (!url || !key) throw new Error('SUPABASE_URL and SUPABASE_SERVICE_KEY must be set')
-  return createClient(url, key)
-}
 
 /**
  * Appends one immutable event to event_log.
  * Throws immediately if decisionSnapshot is missing or null.
  * Never updates existing rows. Never deletes.
+ * Automatically projects the event into action_execution_state via processEvent().
  */
 export async function writeEvent(input: WriteEventInput): Promise<EventLogRow> {
   // Guard: decisionSnapshot is non-negotiable — enforce before any DB call
@@ -34,7 +31,7 @@ export async function writeEvent(input: WriteEventInput): Promise<EventLogRow> {
     )
   }
 
-  const supabase = getSupabaseClient()
+  const db = getDb()
 
   const row = {
     organization_id:   input.organizationId,
@@ -65,7 +62,7 @@ export async function writeEvent(input: WriteEventInput): Promise<EventLogRow> {
     duration_ms:       input.durationMs ?? null,
   }
 
-  const { data, error } = await supabase
+  const { data, error } = await db
     .from('event_log')
     .insert(row)
     .select()
@@ -75,5 +72,13 @@ export async function writeEvent(input: WriteEventInput): Promise<EventLogRow> {
     throw new Error(`[event-log] Failed to write event: ${error.message} (code: ${error.code})`)
   }
 
-  return data as EventLogRow
+  const eventRow = data as EventLogRow
+
+  // Project event into action_execution_state for idempotency tracking.
+  // processEvent() is fire-and-forget — never block the caller on projection failure.
+  processEvent(eventRow).catch((err: unknown) => {
+    console.error('[event-log] processEvent failed (non-fatal):', err)
+  })
+
+  return eventRow
 }

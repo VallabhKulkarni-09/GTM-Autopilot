@@ -41,12 +41,15 @@ vi.mock('../../agents/qualification/index.js', () => ({
   QualificationAgent: class {
     name = 'qualification-agent'
     version = 'v1.0.0'
-    async execute(input: any) {
+    run(input: any) {
       return {
         type: 'qualify_lead',
-        parameters: { is_icp_fit: input.lead.is_icp_fit ?? true }
+        parameters: { is_icp_fit: input.lead.is_icp_fit ?? true },
+        decisionRiskScore: 0.0,
+        rawConfidence: 1.0,
       }
     }
+    async execute(input: any) { return this.run(input) }
   }
 }))
 
@@ -54,12 +57,13 @@ vi.mock('../../agents/routing/index.js', () => ({
   RoutingAgent: class {
     name = 'routing-agent'
     version = 'v1.0.0'
-    async execute(input: any) {
+    run(input: any) {
       if (input.lead.requires_human_approval) {
-        return { type: 'request_human_review' }
+        return { type: 'request_human_review', decisionRiskScore: 0.0, rawConfidence: 1.0 }
       }
-      return { type: 'assign_owner' }
+      return { type: 'assign_owner', decisionRiskScore: 0.0, rawConfidence: 1.0 }
     }
+    async execute(input: any) { return this.run(input) }
   }
 }))
 

@@ -23,7 +23,7 @@ import type { ConnectorName } from '../domain/db-types.js'
 export type ConnectorRegistry = {
   salesforce: {
     assignLeadOwner(leadId: string, ownerId: string, idempotencyKey: string): Promise<void>
-    createTask(leadId: string, task: { subject: string; due_date: string }, idempotencyKey: string): Promise<{ Id: string }>
+    createTask(leadId: string, task: { subject: string; description?: string; due_date: string }, idempotencyKey: string): Promise<{ Id: string }>
   }
   hubspot: unknown
   outreach: {
@@ -95,6 +95,44 @@ async function incrementRoutingStateIndex(
     .update({ counter: (data.counter ?? 0) + 1 })
     .eq('id', data.id)
     .eq('organization_id', organizationId)
+}
+
+// ─── Briefing card builder ────────────────────────────────────────────────────
+
+function buildBriefingCard(
+  lead: { first_name?: string | null; last_name?: string | null; title?: string | null; email: string; form_submitted_at: string },
+  company: { name?: string | null; employee_count?: number | null; annual_revenue?: number | null; industry?: string | null } | null,
+  evidence: Array<{ source_type?: string; data?: Record<string, unknown> }>,
+  rawPayload: Record<string, unknown> | null
+): string {
+  const name = [lead.first_name, lead.last_name].filter(Boolean).join(' ') || lead.email
+  const minutesAgo = Math.round((Date.now() - new Date(lead.form_submitted_at).getTime()) / 60000)
+
+  // Extract tech stack from evidence
+  const techEvidence = evidence.find(e => e.source_type === 'clearbit_enrichment')
+  const techStack: string[] = (techEvidence?.data?.tech as string[] | undefined) ?? []
+  const techLine = techStack.length > 0 ? techStack.slice(0, 5).join(', ') : 'Unknown'
+
+  // Extract form comment
+  const comment = (rawPayload?.message ?? rawPayload?.comment ?? rawPayload?.use_case ?? '') as string
+
+  // Revenue formatting
+  const revenue = company?.annual_revenue
+    ? `$${Math.round(company.annual_revenue / 100_000_000) / 10}M ARR`
+    : 'Unknown'
+
+  const lines = [
+    `📋 INBOUND LEAD BRIEF — Submitted ${minutesAgo}m ago`,
+    `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`,
+    `👤 ${name}${lead.title ? ` — ${lead.title}` : ''}`,
+    `🏢 ${company?.name ?? 'Unknown'} | ${company?.employee_count ?? '?'} employees | ${revenue} | ${company?.industry ?? 'Unknown'}`,
+    `💻 Tech: ${techLine}`,
+    ...(comment ? [`💬 Request: "${comment.slice(0, 200)}"`] : []),
+    `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`,
+    `🎯 Angle: "Since they use ${techStack[0] ?? 'your stack'}, ask how they currently handle lead qualification and routing."`,
+  ]
+
+  return lines.join('\n')
 }
 
 // ─── Main executor ────────────────────────────────────────────────────────────
@@ -170,11 +208,21 @@ export async function executeAction(
         // Assign owner in Salesforce
         await connectors.salesforce.assignLeadOwner(sfLeadId, recommended_owner_id, key)
 
-        // Create call task due in 15 minutes
+        // Create call task due in 15 minutes with briefing card
         const dueDate = new Date(Date.now() + 15 * 60 * 1000).toISOString()
+        const briefingCard = buildBriefingCard(
+          decisionSnapshot.lead,
+          decisionSnapshot.company,
+          [],
+          decisionSnapshot.lead.raw_payload ?? null
+        )
         const task = await connectors.salesforce.createTask(
           sfLeadId,
-          { subject: 'Call within 15 minutes', due_date: dueDate },
+          {
+            subject: `Call within 15 minutes — ${decisionSnapshot.lead.first_name ?? ''} ${decisionSnapshot.lead.last_name ?? ''} @ ${decisionSnapshot.company?.name ?? ''}`.trim(),
+            description: briefingCard,
+            due_date: dueDate,
+          },
           `${key}:task`
         )
 

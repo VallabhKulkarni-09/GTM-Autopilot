@@ -176,7 +176,7 @@ describe('executeAction', () => {
     expect(mockSalesforce.assignLeadOwner).toHaveBeenCalledWith('sf_lead_1', 'sf_owner_1', IDEM_KEY)
     expect(mockSalesforce.createTask).toHaveBeenCalledWith(
       'sf_lead_1',
-      expect.objectContaining({ subject: 'Call within 15 minutes' }),
+      expect.objectContaining({ due_date: expect.any(String) }),
       `${IDEM_KEY}:task`
     )
   })

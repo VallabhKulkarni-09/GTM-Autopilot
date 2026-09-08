@@ -4,16 +4,12 @@
  * All queries are organization-scoped (no exceptions).
  */
 
-import { createClient } from '@supabase/supabase-js'
+import { getDb } from '../db/client.js'
 import type { Lead, UpdateLead } from '../domain/db-types.js'
-
-function getClient() {
-  return createClient(process.env.SUPABASE_URL!, process.env.SUPABASE_SERVICE_KEY!)
-}
 
 export const leadRepo = {
   async getById(organizationId: string, leadId: string): Promise<Lead | null> {
-    const { data, error } = await getClient()
+    const { data, error } = await getDb()
       .from('leads')
       .select('*')
       .eq('id', leadId)
@@ -24,7 +20,7 @@ export const leadRepo = {
   },
 
   async getByEmail(organizationId: string, email: string): Promise<Lead | null> {
-    const { data, error } = await getClient()
+    const { data, error } = await getDb()
       .from('leads')
       .select('*')
       .eq('organization_id', organizationId)
@@ -35,19 +31,28 @@ export const leadRepo = {
     return data as Lead
   },
 
-  async isDuplicate(organizationId: string, email: string): Promise<boolean> {
-    const { count, error } = await getClient()
+  /**
+   * Returns true if another non-duplicate lead with the same email already exists
+   * in this org. Pass excludeLeadId to prevent a freshly-inserted lead from
+   * matching itself.
+   */
+  async isDuplicate(organizationId: string, email: string, excludeLeadId?: string): Promise<boolean> {
+    let query = getDb()
       .from('leads')
       .select('id', { count: 'exact', head: true })
       .eq('organization_id', organizationId)
       .eq('email', email)
       .eq('is_duplicate', false)
+    if (excludeLeadId) {
+      query = (query as any).neq('id', excludeLeadId)
+    }
+    const { count, error } = await (query as any)
     if (error) return false
     return (count ?? 0) > 0
   },
 
   async update(organizationId: string, leadId: string, data: UpdateLead): Promise<void> {
-    const { error } = await getClient()
+    const { error } = await getDb()
       .from('leads')
       .update(data)
       .eq('id', leadId)
@@ -63,7 +68,7 @@ export const leadRepo = {
     const { page = 1, limit = 50, stage } = opts
     const from = (page - 1) * limit
 
-    let query = getClient()
+    let query = getDb()
       .from('leads')
       .select('*', { count: 'exact' })
       .eq('organization_id', organizationId)
