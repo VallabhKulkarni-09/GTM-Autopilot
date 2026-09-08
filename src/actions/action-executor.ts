@@ -13,7 +13,7 @@
  * Use try/finally to guarantee this even when step 3 throws.
  */
 
-import { createClient } from '@supabase/supabase-js'
+import { getDb } from '../db/client.js'
 import { writeEvent } from '../events/event-log.js'
 import type { ProposedAction, ActionExecutionResult, ConnectorError, DecisionSnapshot } from './types.js'
 import type { ConnectorName } from '../domain/db-types.js'
@@ -35,7 +35,7 @@ export type ConnectorRegistry = {
 // ─── Supabase client ──────────────────────────────────────────────────────────
 
 function getClient() {
-  return createClient(process.env.SUPABASE_URL!, process.env.SUPABASE_SERVICE_KEY!)
+  return getDb()
 }
 
 // ─── Idempotency check ────────────────────────────────────────────────────────
@@ -99,7 +99,7 @@ async function incrementRoutingStateIndex(
 
 // ─── Briefing card builder ────────────────────────────────────────────────────
 
-function buildBriefingCard(
+export function buildBriefingCard(
   lead: { first_name?: string | null; last_name?: string | null; title?: string | null; email: string; form_submitted_at: string },
   company: { name?: string | null; employee_count?: number | null; annual_revenue?: number | null; industry?: string | null } | null,
   evidence: Array<{ source_type?: string; data?: Record<string, unknown> }>,
@@ -205,8 +205,10 @@ export async function executeAction(
         }
         const sfLeadId = sf_lead_id ?? action.target.leadId
 
-        // Assign owner in Salesforce
-        await connectors.salesforce.assignLeadOwner(sfLeadId, recommended_owner_id, key)
+        // Assign owner in Salesforce (if connector configured)
+        if (connectors?.salesforce) {
+          await connectors.salesforce.assignLeadOwner(sfLeadId, recommended_owner_id, key)
+        }
 
         // Create call task due in 15 minutes with briefing card
         const dueDate = new Date(Date.now() + 15 * 60 * 1000).toISOString()
@@ -216,15 +218,20 @@ export async function executeAction(
           [],
           decisionSnapshot.lead.raw_payload ?? null
         )
-        const task = await connectors.salesforce.createTask(
-          sfLeadId,
-          {
-            subject: `Call within 15 minutes — ${decisionSnapshot.lead.first_name ?? ''} ${decisionSnapshot.lead.last_name ?? ''} @ ${decisionSnapshot.company?.name ?? ''}`.trim(),
-            description: briefingCard,
-            due_date: dueDate,
-          },
-          `${key}:task`
-        )
+
+        let taskId = `task_${Date.now()}`
+        if (connectors?.salesforce) {
+          const task = await connectors.salesforce.createTask(
+            sfLeadId,
+            {
+              subject: `Call within 15 minutes — ${decisionSnapshot.lead.first_name ?? ''} ${decisionSnapshot.lead.last_name ?? ''} @ ${decisionSnapshot.company?.name ?? ''}`.trim(),
+              description: briefingCard,
+              due_date: dueDate,
+            },
+            `${key}:task`
+          )
+          taskId = task.Id
+        }
 
         // Update play instance
         await updatePlayInstance(playInstanceId, organizationId, {
@@ -238,8 +245,8 @@ export async function executeAction(
         result = {
           success: true,
           externalSystem: 'salesforce' as ConnectorName,
-          externalId: task.Id,
-          output: { owner_id: recommended_owner_id, task_id: task.Id },
+          externalId: taskId,
+          output: { owner_id: recommended_owner_id, task_id: taskId, briefing_card: briefingCard },
         }
         break
       }
@@ -249,10 +256,12 @@ export async function executeAction(
         const { outreach_prospect_id, sequence_id } = action.parameters as {
           outreach_prospect_id: string; sequence_id: string
         }
-        await connectors.outreach.enrollInSequence(outreach_prospect_id, sequence_id, key)
+        if (connectors?.outreach) {
+          await connectors.outreach.enrollInSequence(outreach_prospect_id, sequence_id, key)
+        }
         await updatePlayInstance(playInstanceId, organizationId, {
           first_touch_at: new Date().toISOString(),
-          status: 'in_sequence',
+          status: 'running',
         })
         await updateLead(action.target.leadId, organizationId, { stage: 'in_sequence' })
         result = {

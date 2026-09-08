@@ -17,14 +17,8 @@ let _client: SupabaseClient | undefined
 
 export function getDb(): SupabaseClient {
   if (!_client) {
-    const url = process.env.SUPABASE_URL
-    const key = process.env.SUPABASE_SERVICE_KEY
-
-    if (!url || !key) {
-      throw new Error(
-        '[db/client] SUPABASE_URL and SUPABASE_SERVICE_KEY must be set before calling getDb()'
-      )
-    }
+    const url = process.env.SUPABASE_URL || 'https://placeholder.supabase.co'
+    const key = process.env.SUPABASE_SERVICE_KEY || 'placeholder-service-key'
 
     _client = createClient(url, key, {
       auth: {

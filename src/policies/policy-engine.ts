@@ -4,12 +4,12 @@
  * Supports: in, not_in, eq, neq, gte, lte, contains, and, or
  */
 
-import { createClient } from '@supabase/supabase-js'
+import { getDb } from '../db/client.js'
 import type { Lead, Company } from '../domain/db-types.js'
 import type { PolicyEvaluationResult, Condition } from './types.js'
 
 function getClient() {
-  return createClient(process.env.SUPABASE_URL!, process.env.SUPABASE_SERVICE_KEY!)
+  return getDb()
 }
 
 // ─── Field resolver ───────────────────────────────────────────────────────────

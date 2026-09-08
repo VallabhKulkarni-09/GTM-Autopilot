@@ -4,12 +4,12 @@
  */
 
 import { Worker } from 'bullmq'
-import { createClient } from '@supabase/supabase-js'
+import { getDb } from '../../db/client.js'
 import { writeEvent } from '../../events/event-log.js'
 import { redisConnection } from '../setup.js'
 
 function getClient() {
-  return createClient(process.env.SUPABASE_URL!, process.env.SUPABASE_SERVICE_KEY!)
+  return getDb()
 }
 
 export const escalateWorker = new Worker(

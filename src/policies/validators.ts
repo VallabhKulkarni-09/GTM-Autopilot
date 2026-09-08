@@ -4,13 +4,13 @@
  * Determines whether human approval is required.
  */
 
-import { createClient } from '@supabase/supabase-js'
+import { getDb } from '../db/client.js'
 import type { ActionRiskRegistry } from '../domain/db-types.js'
 import type { ProposedAction } from '../agents/qualification/types.js'
 import type { ValidationResult } from './types.js'
 
 function getClient() {
-  return createClient(process.env.SUPABASE_URL!, process.env.SUPABASE_SERVICE_KEY!)
+  return getDb()
 }
 
 export async function validateProposedAction(

@@ -8,11 +8,11 @@
  * - ownerWorkloads = COUNT(*) of running play_instances per assigned_owner_id
  */
 
-import { createClient } from '@supabase/supabase-js'
+import { getDb } from '../db/client.js'
 import type { Lead, Company, PolicyRule, DecisionSnapshot } from '../domain/db-types.js'
 
 function getClient() {
-  return createClient(process.env.SUPABASE_URL!, process.env.SUPABASE_SERVICE_KEY!)
+  return getDb()
 }
 
 export type BuildDecisionSnapshotParams = {

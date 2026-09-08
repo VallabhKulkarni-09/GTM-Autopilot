@@ -9,12 +9,12 @@
  *   is_current:  true on insert
  */
 
-import { createClient } from '@supabase/supabase-js'
+import { getDb } from '../db/client.js'
 import type { ClearbitPerson, ClearbitCompany } from '../connectors/clearbit/clearbit.types.js'
 import type { Evidence } from '../domain/db-types.js'
 
 function getClient() {
-  return createClient(process.env.SUPABASE_URL!, process.env.SUPABASE_SERVICE_KEY!)
+  return getDb()
 }
 
 function thirtyDaysFromNow(): string {

@@ -11,12 +11,12 @@
  * Plays where the deadline was miscalculated (created_at-based) are SKIPPED with WARNING.
  */
 
-import { createClient } from '@supabase/supabase-js'
+import { getDb } from '../../db/client.js'
 import { writeEvent } from '../../events/event-log.js'
 import { addJob } from '../setup.js'
 
 function getClient() {
-  return createClient(process.env.SUPABASE_URL!, process.env.SUPABASE_SERVICE_KEY!)
+  return getDb()
 }
 
 export async function runSlaTimer(organizationIds: string[]): Promise<void> {

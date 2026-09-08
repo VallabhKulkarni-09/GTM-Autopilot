@@ -6,6 +6,38 @@ vi.mock('../../events/event-log.js', () => ({
   writeEvent: vi.fn().mockResolvedValue({})
 }))
 
+vi.mock('../../db/client.js', () => ({
+  getDb: vi.fn().mockReturnValue({
+    from: vi.fn().mockReturnValue({
+      select: vi.fn().mockReturnThis(),
+      eq: vi.fn().mockReturnThis(),
+      neq: vi.fn().mockReturnThis(),
+      contains: vi.fn().mockReturnThis(),
+      limit: vi.fn().mockReturnThis(),
+      single: vi.fn().mockResolvedValue({ data: null, error: null }),
+      insert: vi.fn().mockReturnThis(),
+      update: vi.fn().mockReturnThis(),
+      upsert: vi.fn().mockReturnThis(),
+    })
+  }),
+  _resetDbClient: vi.fn()
+}))
+
+
+vi.mock('../../connectors/clearbit/clearbit.connector.js', () => ({
+  ClearbitConnector: class {
+    async connect() {}
+    async enrichByEmail() { return null }
+    async enrichByDomain() { return null }
+  }
+}))
+
+vi.mock('../../evidence/evidence-store.js', () => ({
+  storeEnrichmentEvidence: vi.fn().mockResolvedValue([]),
+  getLeadEvidence: vi.fn().mockResolvedValue([])
+}))
+
+
 vi.mock('../../actions/executor.js', () => ({
   executeAction: vi.fn().mockResolvedValue({})
 }))

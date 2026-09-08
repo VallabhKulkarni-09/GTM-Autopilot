@@ -1,4 +1,4 @@
-import { createClient } from '@supabase/supabase-js'
+import { getDb } from '../../../db/client.js'
 import { WorkflowState } from '../state.js'
 import { storeEnrichmentEvidence } from '../../../evidence/evidence-store.js'
 import { ClearbitConnector } from '../../../connectors/clearbit/clearbit.connector.js'
@@ -6,7 +6,7 @@ import { writeEvent } from '../../../events/event-log.js'
 import { buildDecisionSnapshot } from '../../../evidence/context-builder.js'
 
 function getClient() {
-  return createClient(process.env.SUPABASE_URL!, process.env.SUPABASE_SERVICE_KEY!)
+  return getDb()
 }
 
 export async function enrich(state: WorkflowState): Promise<Partial<WorkflowState>> {
@@ -74,7 +74,7 @@ export async function enrich(state: WorkflowState): Promise<Partial<WorkflowStat
     )
 
     // Build a Company-shaped object for state from Clearbit data
-    const company = enrichResult?.company
+    let company = enrichResult?.company
       ? {
           id: companyId ?? '',
           organization_id: state.organizationId,
@@ -96,6 +96,23 @@ export async function enrich(state: WorkflowState): Promise<Partial<WorkflowStat
           updated_at: new Date().toISOString(),
         }
       : null
+
+    // If Clearbit didn't return a company, look up existing company by domain in DB
+    if (!company) {
+      const emailDomain = state.lead.email?.split('@')[1]
+      if (emailDomain) {
+        const { data: existingComp } = await db
+          .from('companies')
+          .select('*')
+          .eq('organization_id', state.organizationId)
+          .eq('domain', emailDomain)
+          .limit(1)
+          .single()
+        if (existingComp) {
+          company = existingComp as any
+        }
+      }
+    }
 
     await writeEvent({
       organizationId: state.organizationId,
