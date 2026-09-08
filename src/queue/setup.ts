@@ -37,8 +37,13 @@ export async function addJob(
 
   await queue.add(queueName, data, {
     removeOnComplete: 1000,
-    removeOnFail: 500,
-    priority: options?.priority,
+    removeOnFail:     500,
+    priority:         options?.priority,
+    attempts:         3,
+    backoff: {
+      type:  'exponential',
+      delay: 1_000,   // 1s → 2s → 4s between retries
+    },
   })
 }
 

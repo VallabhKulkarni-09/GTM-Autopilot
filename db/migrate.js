@@ -35,21 +35,12 @@ if (!DB_URL) {
 
 const MIGRATIONS_DIR = path.join(__dirname, 'migrations')
 
-const MIGRATIONS = [
-  '001_organizations.sql',
-  '002_leads.sql',
-  '003_companies.sql',
-  '004_external_identity.sql',
-  '005_evidence.sql',
-  '006_policy_rules.sql',
-  '007_action_risk_registry.sql',
-  '008_play_instance.sql',
-  '009_event_log.sql',
-  '010_action_execution_state.sql',
-  '011_connector_config.sql',
-  '012_routing_state.sql',
-  '013_rls_policies.sql',
-]
+// Auto-discover all *.sql migration files from db/migrations/, sorted lexicographically.
+// Adding a new migration file requires NO changes here — it will be picked up automatically.
+const MIGRATIONS = fs
+  .readdirSync(MIGRATIONS_DIR)
+  .filter(f => f.endsWith('.sql'))
+  .sort()  // lexicographic sort: 001_… → 014_… → 099_… always in order
 
 async function runMigration(client, filename) {
   const filepath = path.join(MIGRATIONS_DIR, filename)
@@ -163,8 +154,8 @@ async function main() {
 
     console.log('\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━')
     if (allPassed) {
-      console.log(' ✅ All 13 migrations complete. All checks passed.')
-      console.log(' Ready to merge feat/schema → main.')
+      console.log(` ✅ All ${MIGRATIONS.length} migrations complete. All checks passed.`)
+      console.log(' Ready to merge to main.')
     } else {
       console.log(' ❌ Some checks failed. Do not merge until resolved.')
       process.exit(1)
