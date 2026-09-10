@@ -37,6 +37,27 @@ vi.mock('../../repositories/lead.repo.js', () => ({
   }
 }))
 
+// Mock getDb() for route.ts's routing_state and external_identity queries.
+// Returns empty data → RoutingAgent falls back to request_human_review,
+// which is the correct behavior when no SF users are registered.
+vi.mock('../../db/client.js', () => {
+  const makeChain = (resolveValue: any) => {
+    const chain: any = {
+      from: () => chain,
+      select: () => chain,
+      eq: () => chain,
+      single: () => Promise.resolve(resolveValue),
+      // resolves the chain for non-single queries
+      then: (resolve: any) => Promise.resolve(resolveValue).then(resolve),
+    }
+    return chain
+  }
+  return {
+    getDb: () => makeChain({ data: null, error: null }),
+    _resetDbClient: vi.fn(),
+  }
+})
+
 vi.mock('../../agents/qualification/index.js', () => ({
   QualificationAgent: class {
     name = 'qualification-agent'

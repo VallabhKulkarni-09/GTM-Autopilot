@@ -199,41 +199,55 @@ export async function executeAction(
         }
         const sfLeadId = sf_lead_id ?? action.target.leadId
 
-        // Assign owner in Salesforce
-        await connectors.salesforce.assignLeadOwner(sfLeadId, recommended_owner_id, key)
+        let externalId: string | undefined
+        const sfAvailable = !!connectors?.salesforce
 
-        // Create call task due in 15 minutes with briefing card
-        const dueDate = new Date(Date.now() + 15 * 60 * 1000).toISOString()
-        const briefingCard = buildBriefingCard(
-          decisionSnapshot.lead,
-          decisionSnapshot.company,
-          [],
-          decisionSnapshot.lead.raw_payload ?? null
-        )
-        const task = await connectors.salesforce.createTask(
-          sfLeadId,
-          {
-            subject: `Call within 15 minutes — ${decisionSnapshot.lead.first_name ?? ''} ${decisionSnapshot.lead.last_name ?? ''} @ ${decisionSnapshot.company?.name ?? ''}`.trim(),
-            description: briefingCard,
-            due_date: dueDate,
-          },
-          `${key}:task`
-        )
+        if (sfAvailable) {
+          // Assign owner in Salesforce
+          await connectors.salesforce.assignLeadOwner(sfLeadId, recommended_owner_id, key)
 
-        // Update play instance
+          // Create call task with briefing card, due at the SLA deadline
+          const dueDate = (decisionSnapshot as any).firstTouchDeadline
+            ?? new Date(Date.now() + 15 * 60 * 1000).toISOString()
+          const briefingCard = buildBriefingCard(
+            decisionSnapshot.lead,
+            decisionSnapshot.company,
+            [],
+            decisionSnapshot.lead.raw_payload ?? null
+          )
+          const task = await connectors.salesforce.createTask(
+            sfLeadId,
+            {
+              subject: `Call within SLA — ${decisionSnapshot.lead.first_name ?? ''} ${decisionSnapshot.lead.last_name ?? ''} @ ${decisionSnapshot.company?.name ?? ''}`.trim(),
+              description: briefingCard,
+              due_date: dueDate,
+            },
+            `${key}:task`
+          )
+          externalId = task.Id
+        } else {
+          // SF connector not configured — record intent without crashing.
+          // The assigned_owner_id is still written to play_instance so the
+          // dashboard can surface it. An operator can manually action in SF.
+          console.warn(`[action-executor] assign_owner: SF connector unavailable for org ${organizationId} — recording owner assignment without SF sync`)
+        }
+
+        // Always: update play instance and advance routing counter
         await updatePlayInstance(playInstanceId, organizationId, {
-          assigned_owner_id: recommended_owner_id,
+          assigned_owner_id:   recommended_owner_id,
+          assigned_owner_name: (action.parameters as any).owner_name ?? null,
           status: 'running',
         })
-
-        // Advance round-robin counter
         await incrementRoutingStateIndex(organizationId, queue_name)
 
         result = {
           success: true,
-          externalSystem: 'salesforce' as ConnectorName,
-          externalId: task.Id,
-          output: { owner_id: recommended_owner_id, task_id: task.Id },
+          ...(sfAvailable ? { externalSystem: 'salesforce' as ConnectorName, externalId } : {}),
+          output: {
+            owner_id:              recommended_owner_id,
+            sf_synced:             sfAvailable,
+            ...(externalId ? { task_id: externalId } : {}),
+          },
         }
         break
       }
@@ -243,17 +257,25 @@ export async function executeAction(
         const { outreach_prospect_id, sequence_id } = action.parameters as {
           outreach_prospect_id: string; sequence_id: string
         }
-        await connectors.outreach.enrollInSequence(outreach_prospect_id, sequence_id, key)
+
+        const outreachAvailable = !!connectors?.outreach
+        if (outreachAvailable) {
+          await connectors.outreach.enrollInSequence(outreach_prospect_id, sequence_id, key)
+        } else {
+          console.warn(`[action-executor] start_sequence: Outreach connector unavailable for org ${organizationId} — sequence enrollment skipped`)
+        }
+
         await updatePlayInstance(playInstanceId, organizationId, {
           first_touch_at: new Date().toISOString(),
           status: 'in_sequence',
+          ...(outreachAvailable ? { sequence_id } : {}),
+          ...(outreachAvailable ? { enrolled_at: new Date().toISOString() } : {}),
         })
         await updateLead(action.target.leadId, organizationId, { stage: 'in_sequence' })
         result = {
           success: true,
-          externalSystem: 'outreach' as ConnectorName,
-          externalId: outreach_prospect_id,
-          output: { sequence_id },
+          ...(outreachAvailable ? { externalSystem: 'outreach' as ConnectorName, externalId: outreach_prospect_id } : {}),
+          output: { sequence_id, outreach_synced: outreachAvailable },
         }
         break
       }
