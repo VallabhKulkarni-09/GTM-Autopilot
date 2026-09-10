@@ -15,9 +15,6 @@ import { getDb } from '../../db/client.js'
 import { writeEvent } from '../../events/event-log.js'
 import { addJob } from '../setup.js'
 
-function getClient() {
-  return getDb()
-}
 
 export async function runSlaTimer(organizationIds: string[]): Promise<void> {
   for (const orgId of organizationIds) {
@@ -27,7 +24,7 @@ export async function runSlaTimer(organizationIds: string[]): Promise<void> {
 }
 
 async function checkBreachedPlays(orgId: string): Promise<void> {
-  const { data: breached, error } = await getClient()
+  const { data: breached, error } = await getDb()
     .from('play_instance')
     .select('id, lead_id, first_touch_deadline, sla_minutes, created_at')
     .eq('organization_id', orgId)
@@ -86,7 +83,7 @@ async function checkBreachedPlays(orgId: string): Promise<void> {
     }
 
     // ── 2. Mark play as breached ─────────────────────────────────────────────
-    await getClient()
+    await getDb()
       .from('play_instance')
       .update({ sla_breached: true, sla_breached_at: new Date().toISOString() })
       .eq('id', play.id)
@@ -98,7 +95,7 @@ async function checkBreachedPlays(orgId: string): Promise<void> {
 }
 
 async function checkDueFollowUps(orgId: string): Promise<void> {
-  const { data: due, error } = await getClient()
+  const { data: due, error } = await getDb()
     .from('play_instance')
     .select('id, lead_id, current_step')
     .eq('organization_id', orgId)

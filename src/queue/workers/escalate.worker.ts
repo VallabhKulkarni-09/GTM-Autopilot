@@ -8,9 +8,6 @@ import { getDb } from '../../db/client.js'
 import { writeEvent } from '../../events/event-log.js'
 import { redisConnection } from '../setup.js'
 
-function getClient() {
-  return getDb()
-}
 
 export const escalateWorker = new Worker(
   'escalate-play',
@@ -18,7 +15,7 @@ export const escalateWorker = new Worker(
     const { playId, organizationId } = job.data
 
     // ── Load play + lead ───────────────────────────────────────────────────
-    const { data: play } = await getClient()
+    const { data: play } = await getDb()
       .from('play_instance')
       .select('id, lead_id, status, sla_breached_at')
       .eq('id', playId)
@@ -30,7 +27,7 @@ export const escalateWorker = new Worker(
       return
     }
 
-    const { data: lead } = await getClient()
+    const { data: lead } = await getDb()
       .from('leads')
       .select('id, email, first_name, last_name, stage')
       .eq('id', play.lead_id)
@@ -38,7 +35,7 @@ export const escalateWorker = new Worker(
       .single()
 
     // ── Load escalation policy ─────────────────────────────────────────────
-    const { data: escalationPolicies } = await getClient()
+    const { data: escalationPolicies } = await getDb()
       .from('policy_rules')
       .select('parameters')
       .eq('organization_id', organizationId)

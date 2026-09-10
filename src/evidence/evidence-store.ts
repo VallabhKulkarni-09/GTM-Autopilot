@@ -13,10 +13,6 @@ import { getDb } from '../db/client.js'
 import type { ClearbitPerson, ClearbitCompany } from '../connectors/clearbit/clearbit.types.js'
 import type { Evidence } from '../domain/db-types.js'
 
-function getClient() {
-  return getDb()
-}
-
 function thirtyDaysFromNow(): string {
   return new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString()
 }
@@ -108,7 +104,7 @@ export async function storeEnrichmentEvidence(
     expires_at: expiresAt,
   }))
 
-  const { data, error } = await getClient()
+  const { data, error } = await getDb()
     .from('evidence')
     .insert(rows)
     .select()
@@ -121,7 +117,7 @@ export async function getLeadEvidence(
   organizationId: string,
   leadId: string
 ): Promise<Evidence[]> {
-  const { data, error } = await getClient()
+  const { data, error } = await getDb()
     .from('evidence')
     .select('*')
     .eq('organization_id', organizationId)

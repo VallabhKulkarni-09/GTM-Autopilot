@@ -8,37 +8,18 @@ import { RoutingAgent } from '../../../agents/routing/index.js'
 import type { RoutingInput } from '../../../agents/routing/types.js'
 import type { ProposedAction } from '../../../actions/types.js'
 
-import { getDb } from '../../../db/client.js'
-
 export async function route(state: WorkflowState): Promise<Partial<WorkflowState>> {
   const decisionSnapshot = await buildDecisionSnapshot(state as any)
 
   try {
-    const territoryPolicyRules = (decisionSnapshot.policies ?? []).filter(
-      (p: any) => p.rule_type === 'territory'
-    )
-    const { data: routingStateRow } = await getDb()
-      .from('routing_state')
-      .select('*')
-      .eq('organization_id', state.organizationId)
-      .limit(1)
-      .single()
-
-    // Default SDR team available for assignment
-    const availableOwners = [
-      { Id: '0055e000001SDR1', Name: 'Alex Rivera (SDR)', Email: 'alex.rivera@company.com', IsActive: true },
-      { Id: '0055e000001SDR2', Name: 'Jordan Chen (SDR)', Email: 'jordan.chen@company.com', IsActive: true },
-      { Id: '0055e000001SDR3', Name: 'Taylor Vance (SDR)', Email: 'taylor.vance@company.com', IsActive: true },
-    ]
-
     const routingInput: RoutingInput = {
       lead: state.lead,
       company: state.company ?? null,
       qualificationResult: state.qualificationResult as any,
-      availableOwners,
-      ownerWorkloads: decisionSnapshot.ownerWorkloads ?? {},
-      territoryPolicyRules,
-      routingState: routingStateRow ?? ({ counter: 0 } as any),
+      availableOwners: [], // TODO: load from SF
+      ownerWorkloads: {},  // TODO: load from SF
+      territoryPolicyRules: [], // TODO: load from DB
+      routingState: {} as any, // TODO: load from DB
     }
     const agent = new RoutingAgent()
     const routingResult = agent.run(routingInput)

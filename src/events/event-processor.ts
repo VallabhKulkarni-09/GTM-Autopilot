@@ -10,18 +10,13 @@
 import { getDb } from '../db/client.js'
 import type { EventLogRow } from './event.types.js'
 
-function getSupabaseClient() {
-  return getDb()
-}
-
 export async function processEvent(event: EventLogRow): Promise<void> {
-  const supabase = getSupabaseClient()
   const key = event.idempotency_key
 
   switch (event.event_type) {
     case 'action_proposed': {
       if (!key) break
-      await supabase.from('action_execution_state').upsert({
+      await getDb().from('action_execution_state').upsert({
         idempotency_key:  key,
         organization_id:  event.organization_id,
         play_instance_id: event.play_instance_id,
@@ -37,7 +32,7 @@ export async function processEvent(event: EventLogRow): Promise<void> {
 
     case 'action_execution_started': {
       if (!key) break
-      await supabase.from('action_execution_state')
+      await getDb().from('action_execution_state')
         .update({ status: 'started', started_at: event.occurred_at })
         .eq('idempotency_key', key)
         .eq('organization_id', event.organization_id)
@@ -46,7 +41,7 @@ export async function processEvent(event: EventLogRow): Promise<void> {
 
     case 'action_execution_succeeded': {
       if (!key) break
-      await supabase.from('action_execution_state')
+      await getDb().from('action_execution_state')
         .update({
           status:         'succeeded',
           completed_at:   event.occurred_at,
@@ -60,7 +55,7 @@ export async function processEvent(event: EventLogRow): Promise<void> {
 
     case 'action_execution_failed': {
       if (!key) break
-      await supabase.from('action_execution_state')
+      await getDb().from('action_execution_state')
         .update({
           status:        'failed',
           completed_at:  event.occurred_at,
@@ -74,7 +69,7 @@ export async function processEvent(event: EventLogRow): Promise<void> {
 
     case 'action_execution_deduplicated': {
       if (!key) break
-      await supabase.from('action_execution_state')
+      await getDb().from('action_execution_state')
         .update({ status: 'deduplicated', completed_at: event.occurred_at })
         .eq('idempotency_key', key)
         .eq('organization_id', event.organization_id)

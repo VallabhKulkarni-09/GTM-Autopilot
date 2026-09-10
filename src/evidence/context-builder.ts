@@ -11,10 +11,6 @@
 import { getDb } from '../db/client.js'
 import type { Lead, Company, PolicyRule, DecisionSnapshot } from '../domain/db-types.js'
 
-function getClient() {
-  return getDb()
-}
-
 export type BuildDecisionSnapshotParams = {
   organizationId: string
   leadId: string
@@ -29,7 +25,7 @@ export async function buildDecisionSnapshot(
   params: BuildDecisionSnapshotParams
 ): Promise<DecisionSnapshot> {
   const { organizationId, leadId, agentName, agentVersion, promptVersion = null, modelName = null } = params
-  const client = getClient()
+  const client = getDb()
 
   // ── Lead (throws if not found) ────────────────────────────────────────────
   const { data: lead, error: leadError } = await client

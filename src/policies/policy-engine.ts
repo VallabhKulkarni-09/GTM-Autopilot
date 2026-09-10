@@ -8,10 +8,6 @@ import { getDb } from '../db/client.js'
 import type { Lead, Company } from '../domain/db-types.js'
 import type { PolicyEvaluationResult, Condition } from './types.js'
 
-function getClient() {
-  return getDb()
-}
-
 // ─── Field resolver ───────────────────────────────────────────────────────────
 
 function resolveField(field: string, lead: Lead, company: Company | null): unknown {
@@ -103,7 +99,7 @@ export async function getApplicablePolicies(
   organizationId: string,
   ruleType: string
 ): Promise<PolicyRule[]> {
-  const { data, error } = await getClient()
+  const { data, error } = await getDb()
     .from('policy_rules')
     .select('*')
     .eq('organization_id', organizationId)

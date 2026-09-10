@@ -24,18 +24,16 @@ function evaluateTerritoryRules(
   const country = ((input.company?.country ?? (input.lead as any)?.country) ?? '').toUpperCase().trim()
 
   for (const rule of input.territoryPolicyRules) {
-    const cond = (((rule as any).condition ?? (rule as any).conditions)) as any
+    const cond = ((rule as any).condition) as any
     if (!cond) continue
-
-    const params = (((rule as any).parameters ?? (rule as any).actions)) as any
 
     // Simple territory match: condition.field = 'country', operator = 'in'
     if (cond.field === 'country' && cond.operator === 'in') {
       const values = (cond.values ?? []).map((v: string) => v.toUpperCase())
       if (values.includes(country) || values.includes('*')) {
         return {
-          queueName: params?.queue_name ?? 'default',
-          ownerIds: params?.owner_ids ?? null,
+          queueName: (((rule as any).parameters) as any)?.queue_name ?? 'default',
+          ownerIds: (((rule as any).parameters) as any)?.owner_ids ?? null,
         }
       }
     }
@@ -43,7 +41,7 @@ function evaluateTerritoryRules(
     // Wildcard / catch-all
     if (cond.operator === 'wildcard' || cond.operator === 'all') {
       return {
-        queueName: params?.queue_name ?? 'default',
+        queueName: (((rule as any).parameters) as any)?.queue_name ?? 'default',
         ownerIds: null,
       }
     }

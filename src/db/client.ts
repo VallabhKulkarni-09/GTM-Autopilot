@@ -1,13 +1,23 @@
 /**
- * src/db/client.ts
- * Shared Supabase client singleton.
+ * src/db/client.ts — Supabase service-role singleton
  *
- * Use getDb() everywhere instead of calling createClient() directly.
- * This prevents socket exhaustion and connection churn under concurrency.
+ * RULES (non-negotiable):
+ *   1. Use getDb() everywhere — never call createClient() in application code.
+ *   2. This client uses SERVICE_KEY and bypasses RLS (server-side only).
+ *   3. Node 20 has no native WebSocket. We pass `ws` as the Realtime transport.
+ *      This is the documented Supabase approach for Node < 22.
+ *      Node 22+ has native WebSocket; the option is harmlessly ignored there.
  *
- * For operations that need a per-request context (e.g. RLS with user JWT),
- * pass the user JWT to createClient() directly — do not use this singleton.
- * The singleton is SERVICE_KEY only and bypasses RLS (for server-side use).
+ * Why not globalThis.WebSocket = ws?
+ *   The `globalThis` approach requires either:
+ *     a) A top-level await (breaks CommonJS, breaks some ESM bundlers), or
+ *     b) require() (only available in CJS, not in ESM output).
+ *   Passing `transport: ws` to createClient is the correct, synchronous,
+ *   ESM-compatible, bundler-safe, and officially-documented approach.
+ *
+ * Why not use the `realtime: { transport: ws }` option?
+ *   The `transport` option on RealtimeClient accepts a WebSocket constructor.
+ *   We pass it as `global.WebSocket` would be set — `ws` itself (as a class).
  */
 
 import { createClient, type SupabaseClient } from '@supabase/supabase-js'
@@ -16,25 +26,34 @@ import ws from 'ws'
 let _client: SupabaseClient | undefined
 
 export function getDb(): SupabaseClient {
-  if (!_client) {
-    const url = process.env.SUPABASE_URL || 'https://placeholder.supabase.co'
-    const key = process.env.SUPABASE_SERVICE_KEY || 'placeholder-service-key'
+  if (_client) return _client
 
-    _client = createClient(url, key, {
-      auth: {
-        persistSession: false,
-        autoRefreshToken: false,
-      },
-      realtime: {
-        transport: ws as any,
-      },
-    })
+  const url = process.env.SUPABASE_URL
+  const key = process.env.SUPABASE_SERVICE_KEY
+
+  if (!url || !key) {
+    throw new Error(
+      '[db/client] SUPABASE_URL and SUPABASE_SERVICE_KEY must be set in environment before calling getDb()'
+    )
   }
+
+  _client = createClient(url, key, {
+    auth: {
+      persistSession:   false,
+      autoRefreshToken: false,
+    },
+    // Node 20 has no native WebSocket. Pass `ws` as the transport so
+    // @supabase/realtime-js can construct a WebSocket without crashing.
+    // This is the officially-documented workaround for Node < 22.
+    realtime: {
+      transport: ws as any,
+    },
+  })
 
   return _client
 }
 
-/** For tests: reset the singleton between test runs. */
+/** For tests only: reset the singleton between test runs. */
 export function _resetDbClient(): void {
   _client = undefined
 }

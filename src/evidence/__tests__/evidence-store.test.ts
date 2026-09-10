@@ -37,8 +37,8 @@ function buildChain(): any {
   })
 }
 
-vi.mock('@supabase/supabase-js', () => ({
-  createClient: () => ({
+vi.mock('../../db/client.js', () => ({
+  getDb: () => ({
     from: (_table: string) => ({
       select: () => buildChain(),
       insert: (rows: unknown[]) => ({
@@ -46,6 +46,7 @@ vi.mock('@supabase/supabase-js', () => ({
       }),
     }),
   }),
+  _resetDbClient: vi.fn(),
 }))
 
 

@@ -5,10 +5,6 @@ import { ClearbitConnector } from '../../../connectors/clearbit/clearbit.connect
 import { writeEvent } from '../../../events/event-log.js'
 import { buildDecisionSnapshot } from '../../../evidence/context-builder.js'
 
-function getClient() {
-  return getDb()
-}
-
 export async function enrich(state: WorkflowState): Promise<Partial<WorkflowState>> {
   const decisionSnapshot = await buildDecisionSnapshot(state as any)
 
@@ -30,7 +26,7 @@ export async function enrich(state: WorkflowState): Promise<Partial<WorkflowStat
     // enrichByEmail returns ClearbitPerson | null (with .company: ClearbitCompany | null)
     const enrichResult = await clearbit.enrichByEmail(state.lead.email).catch(() => null)
 
-    const db = getClient()
+    const db = getDb()
     let companyId: string | null = null
 
     if (enrichResult?.company) {
@@ -74,7 +70,7 @@ export async function enrich(state: WorkflowState): Promise<Partial<WorkflowStat
     )
 
     // Build a Company-shaped object for state from Clearbit data
-    let company = enrichResult?.company
+    const company = enrichResult?.company
       ? {
           id: companyId ?? '',
           organization_id: state.organizationId,
@@ -96,23 +92,6 @@ export async function enrich(state: WorkflowState): Promise<Partial<WorkflowStat
           updated_at: new Date().toISOString(),
         }
       : null
-
-    // If Clearbit didn't return a company, look up existing company by domain in DB
-    if (!company) {
-      const emailDomain = state.lead.email?.split('@')[1]
-      if (emailDomain) {
-        const { data: existingComp } = await db
-          .from('companies')
-          .select('*')
-          .eq('organization_id', state.organizationId)
-          .eq('domain', emailDomain)
-          .limit(1)
-          .single()
-        if (existingComp) {
-          company = existingComp as any
-        }
-      }
-    }
 
     await writeEvent({
       organizationId: state.organizationId,

@@ -39,8 +39,8 @@ function buildChain(): any {
   })
 }
 
-vi.mock('@supabase/supabase-js', () => ({
-  createClient: () => ({
+vi.mock('../../db/client.js', () => ({
+  getDb: () => ({
     from: (table: string) => ({
       select: (..._args: unknown[]) => {
         // For idempotency check on action_execution_state table
@@ -54,6 +54,7 @@ vi.mock('@supabase/supabase-js', () => ({
       insert: () => buildChain(),
     }),
   }),
+  _resetDbClient: vi.fn(),
 }))
 
 function buildChainWith(result: unknown): any {

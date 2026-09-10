@@ -9,16 +9,12 @@ import type { ActionRiskRegistry } from '../domain/db-types.js'
 import type { ProposedAction } from '../agents/qualification/types.js'
 import type { ValidationResult } from './types.js'
 
-function getClient() {
-  return getDb()
-}
-
 export async function validateProposedAction(
   action: ProposedAction,
   organizationId: string
 ): Promise<ValidationResult> {
   // Load registry entry for this action type
-  const { data, error } = await getClient()
+  const { data, error } = await getDb()
     .from('action_risk_registry')
     .select('*')
     .eq('organization_id', organizationId)
