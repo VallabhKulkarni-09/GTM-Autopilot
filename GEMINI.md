@@ -169,6 +169,15 @@ Output: ProposedAction { type: 'assign_owner', owner_id, owner_name, queue_name,
 decision_risk_score: 0.0, raw_confidence: 1.0
 
 ---
+## Git Configuration — Locked
+
+Default branch: main
+Git identity (set locally before any commit):
+  git config --local user.name "VallabhKulkarni-09"
+  git config --local user.email "99166213+VallabhKulkarni-09@users.noreply.github.com"
+
+Never change the repository default branch.
+All feature branches merge into main via PR.
 
 ## Three Things Never Delegated to Agents
 

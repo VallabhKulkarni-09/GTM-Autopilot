@@ -138,22 +138,29 @@ async function runScenario(num, label, leadData, expectedOutcome) {
     // Load lead from DB
     const { data: leadRow } = await db.from('leads').select('*').eq('id', leadId).single()
 
-    // Run through production workflow
-    const initialState = {
-      organizationId: ORG_ID,
-      workflowRunId,
-      leadId,
-      playInstanceId,
-      lead:    leadRow,
-      company: companyRow ?? null,
-      evidence: [],
-      qualificationResult: null,
-      routingResult: null,
-      currentStep: 'start',
-      error: null,
+
+    // runInboundLeadPlay(orgId, hubspotPayload) — the payload carries the pre-created IDs
+    // and lead fields under properties (mirrors what the BullMQ worker passes)
+    const hubspotPayload = {
+      _leadId:         leadId,
+      _playInstanceId: playInstanceId,
+      _workflowRunId:  workflowRunId,
+      occurredAt:      submittedAt,
+      subscriptionType: 'form.submitted',
+      properties: {
+        email:      leadData.email,
+        firstname:  leadData.firstName,
+        lastname:   leadData.lastName,
+        jobtitle:   leadData.title ?? '',
+        company:    leadData.company?.name ?? '',
+        website:    leadData.company?.domain ? `https://${leadData.company.domain}` : '',
+        // Embed company data so the enrich node (when Clearbit absent) has something
+        // to work with — QualificationAgent reads from state.company
+        _preloadedCompany: companyRow ?? null,
+      }
     }
 
-    await runInboundLeadPlay(initialState)
+    await runInboundLeadPlay(ORG_ID, hubspotPayload)
     const elapsed = ((Date.now() - start) / 1000).toFixed(1)
 
     // Read back final state

@@ -11,6 +11,7 @@
  */
 
 import { StateGraph, START, END, MemorySaver, interrupt } from '@langchain/langgraph'
+import { getDb }          from '../../db/client.js'
 import { WorkflowState } from './state.js'
 import { validate }      from './nodes/validate.js'
 import { enrich }        from './nodes/enrich.js'
@@ -166,6 +167,19 @@ export async function runInboundLeadPlay(
     routingResult:       null,
     currentStep:         'start',
     error:               null,
+  }
+
+  // Load the real lead row from DB — the worker always inserts it before calling this function.
+  // This ensures company_id and any worker-side mutations are reflected in the graph's initial state.
+  const { data: dbLead } = await getDb()
+    .from('leads')
+    .select('*')
+    .eq('id', leadId)
+    .eq('organization_id', organizationId)
+    .single()
+
+  if (dbLead) {
+    Object.assign(initialState.lead, dbLead)
   }
 
   await app.invoke(initialState as any, { configurable: { thread_id: workflowRunId } })

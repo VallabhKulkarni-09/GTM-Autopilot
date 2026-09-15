@@ -116,6 +116,21 @@ export async function enrich(state: WorkflowState): Promise<Partial<WorkflowStat
       decisionSnapshot,
       eventStatus: 'skipped'
     })
-    return { currentStep: 'enrich' }
+
+    // Fallback: if lead already has company_id (e.g. pre-seeded or from a prior enrichment),
+    // load the company row from DB so QualificationAgent has data to score against.
+    // This is correct production behavior — Clearbit is one enrichment source, not the only one.
+    let fallbackCompany = null
+    if (state.lead?.company_id) {
+      const { data: existingCompany } = await getDb()
+        .from('companies')
+        .select('*')
+        .eq('id', state.lead.company_id)
+        .eq('organization_id', state.organizationId)
+        .single()
+      fallbackCompany = existingCompany ?? null
+    }
+
+    return { currentStep: 'enrich', ...(fallbackCompany ? { company: fallbackCompany } : {}) }
   }
 }

@@ -35,7 +35,8 @@ export async function route(state: WorkflowState): Promise<Partial<WorkflowState
       .from('external_identity')
       .select('external_id, metadata')
       .eq('organization_id', state.organizationId)
-      .eq('provider', 'salesforce_user')
+      .eq('provider', 'salesforce')
+      .eq('entity_type', 'user')
 
     const availableOwners = (sfIdentities ?? []).map((u: any) => ({
       Id:       u.external_id as string,

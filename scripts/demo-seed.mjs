@@ -44,8 +44,8 @@ const sfUsers = [
   {
     organization_id: orgId,
     entity_type:     'user',
-    entity_id:       '00000000-0000-0000-0000-000000000001',  // internal placeholder UUID
-    provider:        'salesforce_user',
+    entity_id:       '00000000-0000-0000-0000-000000000001',
+    provider:        'salesforce',
     external_id:     sfUserIdArg,
     metadata: {
       name:      sfUserNameArg,
@@ -57,13 +57,13 @@ const sfUsers = [
   {
     organization_id: orgId,
     entity_type:     'user',
-    entity_id:       '00000000-0000-0000-0000-000000000002',  // internal placeholder UUID
-    provider:        'salesforce_user',
+    entity_id:       '00000000-0000-0000-0000-000000000002',
+    provider:        'salesforce',
     external_id:     'PLACEHOLDER_SF_USER_ID_2',
     metadata: {
       name:      'Demo Rep 2',
       email:     'rep2@yourdomain.com',
-      territory: 'emea',               // different territory — exercises territory filtering
+      territory: 'emea',
       title:     'Account Executive'
     }
   }
