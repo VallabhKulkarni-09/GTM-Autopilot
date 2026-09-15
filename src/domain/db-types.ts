@@ -25,7 +25,7 @@ export type ExternalProvider =
   | 'outreach'
   | 'clearbit'
 
-export type ExternalEntityType = 'lead' | 'company'
+export type ExternalEntityType = 'lead' | 'company' | 'user'
 
 export type EvidenceSourceType =
   | 'clearbit_person'
