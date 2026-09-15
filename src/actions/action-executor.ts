@@ -267,7 +267,10 @@ export async function executeAction(
 
         await updatePlayInstance(playInstanceId, organizationId, {
           first_touch_at: new Date().toISOString(),
-          status: 'in_sequence',
+          // play_status enum: running|completed|failed|paused|nurture|duplicate
+          // 'in_sequence' is a LeadStage (lead table), not a PlayStatus (play_instance table).
+          // The play is complete once first-touch actions are done.
+          status: 'completed',
           ...(outreachAvailable ? { sequence_id } : {}),
           ...(outreachAvailable ? { enrolled_at: new Date().toISOString() } : {}),
         })
