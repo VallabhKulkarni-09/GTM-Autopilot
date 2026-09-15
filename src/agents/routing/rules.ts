@@ -24,7 +24,7 @@ function evaluateTerritoryRules(
   const country = ((input.company?.country ?? (input.lead as any)?.country) ?? '').toUpperCase().trim()
 
   for (const rule of input.territoryPolicyRules) {
-    const cond = ((rule as any).condition) as any
+    const cond = ((rule as any).conditions) as any
     if (!cond) continue
 
     // Simple territory match: condition.field = 'country', operator = 'in'

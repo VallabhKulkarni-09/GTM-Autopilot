@@ -26,7 +26,7 @@ const makeCompany = (overrides: Partial<Company> = {}): Company => ({
 const makeTerritoryRule = (country: string | string[], queueName: string, ownerIds?: string[]): PolicyRule => ({
   id: `rule-${queueName}`, organization_id: 'org-1', name: `Territory ${queueName}`,
   rule_type: 'territory', is_active: true, priority: 1,
-  condition: { field: 'country', operator: 'in', values: Array.isArray(country) ? country : [country] },
+  conditions: { field: 'country', operator: 'in', values: Array.isArray(country) ? country : [country] },
   parameters: { queue_name: queueName, owner_ids: ownerIds ?? null },
   created_at: new Date().toISOString(), updated_at: new Date().toISOString(),
 } as any)

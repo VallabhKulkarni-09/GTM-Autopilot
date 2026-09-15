@@ -52,6 +52,18 @@ export function scoreIcp(lead: Lead, company: Company | null): QualificationPara
     }
   }
 
+  // ── Hard gate: micro-companies are never ICP regardless of title/source ─────
+  // Companies with < 10 employees cannot be enterprise ICP by definition.
+  const companySize = company?.employee_count ?? null
+  if (companySize !== null && companySize < 10) {
+    return {
+      is_icp_fit: false,
+      icp_score: 0,
+      icp_tier: 'not_icp' as const,
+      reason_codes: ['DISQUALIFIED_TOO_SMALL'],
+    }
+  }
+
   let score = 0
   const reason_codes: string[] = []
 

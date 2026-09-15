@@ -56,15 +56,15 @@ describe('QualificationAgent — Case 2: Partial match (missing size)', () => {
   })
 })
 
-// ── Case 3: Not ICP — company too small + bad industry + bad region ───────────
+// ── Case 3: Not ICP — company too small (hard gate for < 10 employees) ────────
 describe('QualificationAgent — Case 3: Not ICP (too small + wrong params)', () => {
-  it('returns not_icp with NOT_ICP_TOO_SMALL reason', () => {
+  it('returns not_icp with DISQUALIFIED_TOO_SMALL reason for micro-companies', () => {
     const lead = makeLeadBase()
     const company = makeCompany({ employee_count: 5, industry: 'Agriculture', country: 'CN' })
     const result = qualificationAgent.run(makeInput(lead, company))
     expect(result.parameters.icp_tier).toBe('not_icp')
     expect(result.parameters.is_icp_fit).toBe(false)
-    expect(result.parameters.reason_codes).toContain('NOT_ICP_TOO_SMALL')
+    expect(result.parameters.reason_codes).toContain('DISQUALIFIED_TOO_SMALL')
   })
 })
 

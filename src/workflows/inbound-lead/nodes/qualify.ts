@@ -4,16 +4,30 @@ import { executeAction } from '../../../actions/executor.js'
 import { writeEvent } from '../../../events/event-log.js'
 import { buildDecisionSnapshot } from '../../../evidence/context-builder.js'
 import { QualificationAgent } from '../../../agents/qualification/index.js'
+import { getDb } from '../../../db/client.js'
 import type { QualificationInput } from '../../../agents/qualification/types.js'
 import type { ProposedAction } from '../../../actions/types.js'
 
 export async function qualify(state: WorkflowState): Promise<Partial<WorkflowState>> {
   const decisionSnapshot = await buildDecisionSnapshot(state as any)
 
+  // Load company from DB if not already in state (e.g. when Clearbit is absent
+  // but company was pre-seeded or loaded via another enrichment source).
+  let company = state.company ?? null
+  if (!company && state.lead?.company_id) {
+    const { data } = await getDb()
+      .from('companies')
+      .select('*')
+      .eq('id', state.lead.company_id)
+      .eq('organization_id', state.organizationId)
+      .single()
+    company = (data as any) ?? null
+  }
+
   try {
     const input: QualificationInput = {
       lead: state.lead,
-      company: state.company ?? null,
+      company,
       enrichmentEvidence: state.evidence,
       icpPolicyRules: [], // TODO: load from DB
     }

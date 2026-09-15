@@ -45,10 +45,22 @@ export async function route(state: WorkflowState): Promise<Partial<WorkflowState
       IsActive: true,
     }))
 
-    // ── 4. Run RoutingAgent ───────────────────────────────────────────────────
+    // ── 4. Load company from DB if not in state (Clearbit absent) ─────────────
+    let company = state.company ?? null
+    if (!company && state.lead?.company_id) {
+      const { data: companyData } = await getDb()
+        .from('companies')
+        .select('*')
+        .eq('id', state.lead.company_id)
+        .eq('organization_id', state.organizationId)
+        .single()
+      company = (companyData as any) ?? null
+    }
+
+    // ── 5. Run RoutingAgent ───────────────────────────────────────────────────
     const routingInput: RoutingInput = {
       lead:                state.lead,
-      company:             state.company ?? null,
+      company,
       qualificationResult: state.qualificationResult as any,
       availableOwners,
       ownerWorkloads:      decisionSnapshot.ownerWorkloads,
