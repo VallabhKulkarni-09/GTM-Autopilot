@@ -24,7 +24,7 @@ export type ConnectorRegistry = {
   salesforce: {
     assignLeadOwner(leadId: string, ownerId: string, idempotencyKey: string): Promise<void>
     createTask(leadId: string, task: { subject: string; description?: string; due_date: string }, idempotencyKey: string): Promise<{ Id: string }>
-    createLead(data: { firstName?: string; lastName: string; email: string; title?: string; phone?: string; company?: string; leadSource?: string }, idempotencyKey: string): Promise<{ id: string }>
+    createLead(data: { firstName?: string; lastName: string; email: string; title?: string; phone?: string; company?: string; leadSource?: string }, idempotencyKey: string): Promise<{ Id: string }>
   }
   hubspot: unknown
   outreach: {
@@ -220,7 +220,7 @@ export async function executeAction(
               },
               `${key}:create_lead`
             )
-            resolvedSfLeadId = sfLead.id
+            resolvedSfLeadId = sfLead.Id
 
             // Store in external_identity for future plays (best-effort, non-fatal)
             try {
