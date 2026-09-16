@@ -24,6 +24,7 @@ export type ConnectorRegistry = {
   salesforce: {
     assignLeadOwner(leadId: string, ownerId: string, idempotencyKey: string): Promise<void>
     createTask(leadId: string, task: { subject: string; description?: string; due_date: string }, idempotencyKey: string): Promise<{ Id: string }>
+    createLead(data: { firstName?: string; lastName: string; email: string; title?: string; phone?: string; company?: string; leadSource?: string }, idempotencyKey: string): Promise<{ id: string }>
   }
   hubspot: unknown
   outreach: {
@@ -197,14 +198,46 @@ export async function executeAction(
         const { recommended_owner_id, queue_name, sf_lead_id } = action.parameters as {
           recommended_owner_id: string; queue_name: string; sf_lead_id?: string
         }
-        const sfLeadId = sf_lead_id ?? action.target.leadId
 
         let externalId: string | undefined
         const sfAvailable = !!connectors?.salesforce
 
         if (sfAvailable) {
+          let resolvedSfLeadId = sf_lead_id
+
+          // If no SF Lead ID exists yet, create the Lead in Salesforce first
+          if (!resolvedSfLeadId) {
+            const lead = decisionSnapshot.lead
+            const sfLead = await connectors.salesforce.createLead(
+              {
+                firstName:  lead.first_name ?? '',
+                lastName:   lead.last_name ?? 'Unknown',
+                email:      lead.email,
+                title:      lead.title ?? undefined,
+                phone:      lead.phone ?? undefined,
+                company:    decisionSnapshot.company?.name ?? lead.email.split('@')[1] ?? '[Unknown]',
+                leadSource: 'Web',
+              },
+              `${key}:create_lead`
+            )
+            resolvedSfLeadId = sfLead.id
+
+            // Store in external_identity for future plays (best-effort, non-fatal)
+            try {
+              await getDb().from('external_identity').insert({
+                organization_id: organizationId,
+                entity_type:     'lead',
+                entity_id:       action.target.leadId,
+                provider:        'salesforce',
+                external_id:     resolvedSfLeadId,
+                metadata:        { email: lead.email, created_by: 'action-executor:assign_owner' },
+              })
+            } catch { /* duplicate is fine — idempotent */ }
+          }
+
+          if (!resolvedSfLeadId) throw new Error('[action-executor] assign_owner: could not resolve Salesforce Lead ID')
           // Assign owner in Salesforce
-          await connectors.salesforce.assignLeadOwner(sfLeadId, recommended_owner_id, key)
+          await connectors.salesforce.assignLeadOwner(resolvedSfLeadId, recommended_owner_id, `${key}:assign`)
 
           // Create call task with briefing card, due at the SLA deadline
           const dueDate = (decisionSnapshot as any).firstTouchDeadline
@@ -216,7 +249,7 @@ export async function executeAction(
             decisionSnapshot.lead.raw_payload ?? null
           )
           const task = await connectors.salesforce.createTask(
-            sfLeadId,
+            resolvedSfLeadId,
             {
               subject: `Call within SLA — ${decisionSnapshot.lead.first_name ?? ''} ${decisionSnapshot.lead.last_name ?? ''} @ ${decisionSnapshot.company?.name ?? ''}`.trim(),
               description: briefingCard,

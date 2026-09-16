@@ -174,7 +174,7 @@ describe('executeAction', () => {
 
     expect(result.success).toBe(true)
     expect(result.externalSystem).toBe('salesforce')
-    expect(mockSalesforce.assignLeadOwner).toHaveBeenCalledWith('sf_lead_1', 'sf_owner_1', IDEM_KEY)
+    expect(mockSalesforce.assignLeadOwner).toHaveBeenCalledWith('sf_lead_1', 'sf_owner_1', `${IDEM_KEY}:assign`)
     expect(mockSalesforce.createTask).toHaveBeenCalledWith(
       'sf_lead_1',
       expect.objectContaining({ due_date: expect.any(String) }),
