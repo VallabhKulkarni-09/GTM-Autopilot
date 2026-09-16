@@ -28,9 +28,15 @@ async function loadSalesforceConfig(organizationId: string) {
 }
 
 export async function accountMatch(state: WorkflowState): Promise<Partial<WorkflowState>> {
-  const decisionSnapshot = await buildDecisionSnapshot(state as any)
+  let decisionSnapshot: any = null
 
   try {
+    decisionSnapshot = await buildDecisionSnapshot({
+      ...state as any,
+      agentName:    'account-match',
+      agentVersion: '1.0.0',
+    })
+
     // Extract company domain from state (set by enrich node) or from email
     const domain =
       (state.company as any)?.domain ??
@@ -114,17 +120,21 @@ export async function accountMatch(state: WorkflowState): Promise<Partial<Workfl
   } catch (err: any) {
     // Account match failure is non-fatal — log and fall through to normal pipeline
     console.error(`[account-match] Failed for lead ${state.leadId}:`, err?.message ?? err)
-    await writeEvent({
-      organizationId: state.organizationId,
-      workflowRunId:  state.workflowRunId,
-      playInstanceId: state.playInstanceId,
-      leadId:         state.leadId,
-      eventType:      'account_match_error',
-      actorType:      'system',
-      decisionSnapshot,
-      eventStatus:    'skipped',
-      errorMessage:   err?.message,
-    })
+    try {
+      await writeEvent({
+        organizationId:   state.organizationId,
+        workflowRunId:    state.workflowRunId,
+        playInstanceId:   state.playInstanceId,
+        leadId:           state.leadId,
+        eventType:        'account_match_error',
+        actorType:        'system',
+        decisionSnapshot: decisionSnapshot ?? { lead: { id: state.leadId }, error: 'snapshot_unavailable' },
+        eventStatus:      'skipped',
+        errorMessage:     err?.message,
+      })
+    } catch {
+      // writeEvent itself failed — nothing more to do
+    }
     return { currentStep: 'account_match' }
   }
 }
