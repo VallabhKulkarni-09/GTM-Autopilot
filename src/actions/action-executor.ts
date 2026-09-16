@@ -25,6 +25,7 @@ export type ConnectorRegistry = {
     assignLeadOwner(leadId: string, ownerId: string, idempotencyKey: string): Promise<void>
     createTask(leadId: string, task: { subject: string; description?: string; due_date: string }, idempotencyKey: string): Promise<{ Id: string }>
     createLead(data: { firstName?: string; lastName: string; email: string; title?: string; phone?: string; company?: string; leadSource?: string }, idempotencyKey: string): Promise<{ Id: string }>
+    findLeadByEmail(email: string): Promise<{ Id: string } | null>
   }
   hubspot: unknown
   outreach: {
@@ -205,22 +206,32 @@ export async function executeAction(
         if (sfAvailable) {
           let resolvedSfLeadId = sf_lead_id
 
-          // If no SF Lead ID exists yet, create the Lead in Salesforce first
+          // If no SF Lead ID exists yet, find-or-create the Lead in Salesforce
           if (!resolvedSfLeadId) {
             const lead = decisionSnapshot.lead
-            const sfLead = await connectors.salesforce.createLead(
-              {
-                firstName:  lead.first_name ?? '',
-                lastName:   lead.last_name ?? 'Unknown',
-                email:      lead.email,
-                title:      lead.title ?? undefined,
-                phone:      lead.phone ?? undefined,
-                company:    decisionSnapshot.company?.name ?? lead.email.split('@')[1] ?? '[Unknown]',
-                leadSource: 'Web',
-              },
-              `${key}:create_lead`
-            )
-            resolvedSfLeadId = sfLead.Id
+
+            // Find first — avoids DUPLICATE_VALUE if the lead was already created
+            // (e.g. from a previous run attempt or an earlier play for this contact)
+            const existing = await connectors.salesforce.findLeadByEmail(lead.email)
+
+            if (existing) {
+              resolvedSfLeadId = existing.Id
+            } else {
+              // Create — lead does not yet exist in Salesforce
+              const sfLead = await connectors.salesforce.createLead(
+                {
+                  firstName:  lead.first_name ?? '',
+                  lastName:   lead.last_name ?? 'Unknown',
+                  email:      lead.email,
+                  title:      lead.title ?? undefined,
+                  phone:      lead.phone ?? undefined,
+                  company:    decisionSnapshot.company?.name ?? lead.email.split('@')[1] ?? '[Unknown]',
+                  leadSource: 'Web',
+                },
+                `${key}:create_lead`
+              )
+              resolvedSfLeadId = sfLead.Id
+            }
 
             // Store in external_identity for future plays (best-effort, non-fatal)
             try {
@@ -232,7 +243,7 @@ export async function executeAction(
                 external_id:     resolvedSfLeadId,
                 metadata:        { email: lead.email, created_by: 'action-executor:assign_owner' },
               })
-            } catch { /* duplicate is fine — idempotent */ }
+            } catch { /* duplicate key — idempotent, ignore */ }
           }
 
           if (!resolvedSfLeadId) throw new Error('[action-executor] assign_owner: could not resolve Salesforce Lead ID')

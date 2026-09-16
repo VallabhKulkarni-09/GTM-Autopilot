@@ -240,7 +240,19 @@ export class SalesforceConnector implements Connector<SalesforceConfig> {
     })
   }
 
-  // ─── Private Helpers ────────────────────────────────────────────────────────
+  /**
+   * Find a Salesforce Lead by email address.
+   * Returns the Lead's SF Id if found, null if not.
+   * Used for find-or-create to avoid DUPLICATE_VALUE errors.
+   */
+  async findLeadByEmail(email: string): Promise<{ Id: string } | null> {
+    const safeEmail = email.replace(/'/g, "\\'")
+    const records = await this.query<{ Id: string }>(
+      `SELECT Id FROM Lead WHERE Email = '${safeEmail}' LIMIT 1`
+    )
+    return records.length > 0 ? records[0] : null
+  }
+
 
   private async query<T>(soql: string, encode = true): Promise<T[]> {
     const token = await this.getValidToken()
