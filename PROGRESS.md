@@ -1,18 +1,18 @@
 # GTM Autopilot — PROGRESS.md
-_Last updated: 2026-09-07_
+_Last updated: 2026-09-16_
 
 ---
 
 ## Current State
 
 ```
-✅ Schema (migrations 001–013)
+✅ Schema (migrations 001–016)
 ✅ Domain types (src/domain/db-types.ts)
-✅ 4 connectors: Salesforce, HubSpot, Outreach, Clearbit
+✅ 4 connectors: Salesforce, HubSpot, Outreach, Clearbit (graceful degradation)
 ✅ Tenant context middleware
 ✅ Event system (event-log + event-processor)
-✅ Qualification agent v1 (rule-based, 10 tests)
-✅ Routing agent v1 (rule-based, 10 tests)
+✅ Qualification agent v1 (rule-based, ICP scoring, hard gates, 10 tests)
+✅ Routing agent v1 (rule-based, territory match, round-robin, 10 tests)
 ✅ Policy engine (9 operators, risk registry, validators)
 ✅ Webhook receiver (HMAC → idempotency → BullMQ → 200ms)
 ✅ SLA timer + escalation worker
@@ -21,6 +21,7 @@ _Last updated: 2026-09-07_
 ✅ Context builder (DecisionSnapshot assembly, 2 tests)
 ✅ LangGraph inbound-lead workflow (4 paths tested)
 ✅ Dashboard (Next.js 15, 4 pages: overview / leads / lead detail / settings)
+✅ DEMO PROVEN: 7 real-world lead scenarios on live Supabase — 0 failures
 ```
 
 **Test suite: 75 passing | 0 failing | 25 skipped (live credentials)**
@@ -119,18 +120,62 @@ dashboard/app/
 
 ---
 
+## Session: 2026-09-15/16 — Real-World Demo Proof
+
+### Bugs Found & Fixed (all pushed to main, 75/75 tests green throughout)
+
+| Bug | Root cause | Fix |
+|---|---|---|
+| `external_provider` enum error | `'salesforce_user'` not a valid value | Changed to `provider='salesforce'` + `entity_type='user'` |
+| `runInboundLeadPlay` wrong args | Demo passed WorkflowState directly | Fixed to `(orgId, hubspotPayload)` with `_leadId/_playInstanceId/_workflowRunId` |
+| `icp_score=null` for all leads | `state.company` null; qualify read it directly | Added DB company lookup in `qualify.ts` when `state.company` null |
+| Territory always fails | `conditions` column read as `condition` (typo) | Fixed in `routing/rules.ts` and routing test mocks |
+| `state.company.country` null in RoutingAgent | Same root cause, different node | Added DB company lookup in `route.ts` |
+| `play_instance.status='in_sequence'` crash | `'in_sequence'` is a `LeadStage` not a `PlayStatus` enum | Changed to `'completed'` in `action-executor.ts` |
+| TinyStartup (8 emp) scored tier_1 | No hard min-size gate; title/source/industry summed to 70 | Added gate: < 10 employees → instant `DISQUALIFIED_TOO_SMALL` |
+
+### New scripts
+
+| File | Purpose |
+|---|---|
+| `scripts/demo-seed.mjs` | Seeds 2 SF users into `external_identity` (idempotent) |
+| `scripts/demo-leads.mjs` | Runs 7 lead scenarios end-to-end on live Supabase |
+| `scripts/demo-verify.mjs` | Reads back outcomes, prints stakeholder proof report |
+| `scripts/demo-cleanup.mjs` | Cleans all demo rows before a fresh run |
+
+### Proof report (live Supabase — `Acme Corp (Sandbox)`)
+
+| # | Lead | Score | Tier | Stage | Play | Events | Failures |
+|---|---|---|---|---|---|---|---|
+| 1 | Sarah Chen — CTO, 800 emp, SaaS, US | 100 | tier_1 | in_sequence | completed | 12 | 0 |
+| 2 | Marcus Webb — VP Sales, 250 emp, US | 100 | tier_1 | in_sequence | completed | 12 | 0 |
+| 3 | Priya Nair — Founder, 8 emp (too small) | 0 | not_icp | nurture | nurture | 9 | 0 |
+| 4 | Anonymous — gmail.com (free email gate) | 0 | not_icp | nurture | nurture | 9 | 0 |
+| 5 | Sarah Chen — DUPLICATE | n/a | n/a | new | completed | 4 | 0 |
+| 6 | Alex Torres — Director, 5000 emp, US | 90 | tier_1 | in_sequence | completed | 12 | 0 |
+| 7 | Jamie Park — Head of Growth, GB (EMEA) | 100 | tier_1 | routing | paused ⏸ | 9 | 0 |
+
+**Total: 7 scenarios, 0 failures, 71 immutable event rows, all with `decision_snapshot`**
+
+Lead 7 correctly paused for human review — no EMEA territory owner seeded, system refused to auto-assign.
+
+---
+
 ## What Remains
 
 ```
-[ ] End-to-end play test
-      — Wire up inbound-lead.worker.ts to call runInboundLeadPlay()
-      — Set real env vars (SUPABASE_URL, HUBSPOT_*, SALESFORCE_*, OUTREACH_*, CLEARBIT_*)
-      — Submit one real HubSpot form → watch the play run
-
 [ ] Production deploy
       — Railway: deploy Fastify API + BullMQ workers
       — Vercel: deploy dashboard/ (set NEXT_PUBLIC_API_URL + DASHBOARD_JWT)
       — Verify /api/metrics/overview returns real data
+
+[ ] Real HubSpot credentials → live webhook test
+      — Set HUBSPOT_API_KEY + HUBSPOT_WEBHOOK_SECRET
+      — Submit one real HubSpot form → watch play run in Supabase
+
+[ ] Real Salesforce credentials → SF task creation test
+      — Set SF_CLIENT_ID + SF_CLIENT_SECRET + SF_INSTANCE_URL
+      — Assign owner → verify SF Task created in Developer Edition
 
 [ ] Design partner sandbox goes live
 ```
@@ -142,4 +187,5 @@ dashboard/app/
 |---|---|
 | After wave 1+2 merge | 33 passing |
 | After wave 3 merge (5 PRs) | 61 passing |
-| After wave 4 merge | **75 passing** |
+| After wave 4 merge | 75 passing |
+| After demo fixes (2026-09-16) | **75 passing** (routing + qualification bugs fixed) |
