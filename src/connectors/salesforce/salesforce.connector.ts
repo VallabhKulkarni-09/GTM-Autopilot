@@ -266,7 +266,17 @@ export class SalesforceConnector implements Connector<SalesforceConfig> {
 
   private async refreshToken(): Promise<void> {
     const { clientId, clientSecret, instanceUrl, sandbox } = this.config!
-    const loginUrl = sandbox ? 'https://test.salesforce.com' : 'https://login.salesforce.com'
+
+    // Standard orgs: login.salesforce.com
+    // Sandbox orgs:  test.salesforce.com
+    // Custom-domain orgs (e.g. Developer Edition / OrgFarm with *.my.salesforce.com):
+    //   must authenticate against their own domain, not login.salesforce.com
+    const isCustomDomain = instanceUrl.includes('.my.salesforce.com') && !instanceUrl.startsWith('https://login') && !instanceUrl.startsWith('https://test')
+    const loginUrl = isCustomDomain
+      ? instanceUrl
+      : sandbox
+        ? 'https://test.salesforce.com'
+        : 'https://login.salesforce.com'
 
     const body = new URLSearchParams({
       grant_type: 'client_credentials',

@@ -49,7 +49,7 @@ const sfUsers = [
     external_id:     sfUserIdArg,
     metadata: {
       name:      sfUserNameArg,
-      email:     'rep1@yourdomain.com',
+      email:     'cdtermux1011@gmail.com',
       territory: 'north_america',
       title:     'Account Executive'
     }
@@ -59,23 +59,24 @@ const sfUsers = [
     entity_type:     'user',
     entity_id:       '00000000-0000-0000-0000-000000000002',
     provider:        'salesforce',
-    external_id:     'PLACEHOLDER_SF_USER_ID_2',
+    external_id:     sfUserIdArg,   // same user for both slots in a single-user dev org
     metadata: {
-      name:      'Demo Rep 2',
-      email:     'rep2@yourdomain.com',
-      territory: 'emea',
+      name:      sfUserNameArg,
+      email:     'cdtermux1011@gmail.com',
+      territory: 'emea',            // also covers EMEA for Lead 7 demo
       title:     'Account Executive'
     }
   }
 ]
 
 for (const user of sfUsers) {
-  // Check if already exists (unique constraint is on org+entity_type+entity_id+provider)
+  // Check if already exists (unique constraint: org+entity_type+entity_id+provider)
   const { data: existing } = await db
     .from('external_identity')
     .select('id, external_id')
     .eq('organization_id', orgId)
-    .eq('provider', 'salesforce_user')
+    .eq('provider', 'salesforce')
+    .eq('entity_type', 'user')
     .eq('entity_id', user.entity_id)
     .single()
 
