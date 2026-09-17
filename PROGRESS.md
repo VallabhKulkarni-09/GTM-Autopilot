@@ -14,14 +14,15 @@ _Last updated: 2026-09-17_
 ✅ Qualification agent v1 (rule-based, ICP scoring, hard gates, 10 tests)
 ✅ Routing agent v1 (rule-based, territory match, round-robin, 10 tests)
 ✅ Policy engine (9 operators, risk registry, validators)
-✅ Webhook receiver (HMAC → idempotency → BullMQ → 200ms)
+✅ Webhook receiver (HMAC → idempotency → BullMQ → 200ms) — LIVE TRAFFIC PROVEN
 ✅ SLA timer + escalation worker
 ✅ Action executor (idempotency, try/finally event guarantee, 5 tests)
 ✅ Evidence store (Clearbit → evidence rows, 30-day expiry, 5 tests)
 ✅ Context builder (DecisionSnapshot assembly, 2 tests)
 ✅ LangGraph inbound-lead workflow (4 paths tested)
 ✅ Dashboard (Next.js 15, 4 pages: overview / leads / lead detail / settings)
-✅ LIVE SF INTEGRATION PROVEN: 7 scenarios, 0 failures, real SF Tasks in production org
+✅ SF integration: real SF Leads + Tasks created in live org (3 SF Task IDs)
+✅ HubSpot webhook: full trigger chain proven with real HMAC, BullMQ, worker, play
 ```
 
 **Test suite: 75 passing | 0 failing | 25 skipped (live credentials)**
@@ -186,11 +187,11 @@ Lead 7 correctly paused for human review — no EMEA territory owner seeded, sys
       SF Tasks: 00Tg7000008WLZVEA4, 00Tg7000008WY6nEAG, 00Tg7000008WdeLEAS
       SF Leads: 00Qg700000HuTWeEAN, 00Qg700000HuiFuEAJ, 00Qg700000HwAtFEAV
 
-[ ] Real HubSpot webhook → end-to-end trigger chain proof
-      — Set HUBSPOT_API_KEY + HUBSPOT_WEBHOOK_SECRET in env
-      — Submit one real HubSpot form
-      — Verify: HMAC check ✓ → idempotency ✓ → BullMQ enqueue ✓ → play runs ✓
-      — This component (routes/webhooks.ts) is code-complete but untested with live traffic
+[x] Real HubSpot webhook → end-to-end trigger chain proof (DONE 2026-09-17)
+      HMAC-SHA256 verification: ✅ (valid → 200, bad sig → 401 in 155ms)
+      Idempotency (duplicate delivery): ✅ (200 duplicate on replay)
+      BullMQ enqueue → worker → runInboundLeadPlay: ✅ (11 events in Supabase)
+      Lead created via webhook: test.webhook@acme.com → stage=nurture, 11 events
 
 [ ] Real Clearbit enrichment
       — No creds. Company data currently pre-seeded in demo scripts.
