@@ -52,6 +52,29 @@ export class HubSpotConnector implements Connector<HubSpotConfig> {
     })
   }
 
+  /**
+   * Fetch a contact by HubSpot object ID (the numeric ID from webhook payloads).
+   * Returns null when not found. This is the primary lookup from webhook events
+   * since HubSpot webhooks only contain objectId, not email/name.
+   */
+  async getContactById(objectId: number | string): Promise<HubSpotContact | null> {
+    return withRetry(this.name, HubSpotErrorCode.CONTACT_SEARCH_FAILED, async () => {
+      this.assertConnected()
+      const props = 'email,firstname,lastname,jobtitle,phone,company,lifecyclestage,hs_lead_status,website'
+      const res = await fetch(
+        `${HS_BASE}/crm/v3/objects/contacts/${objectId}?properties=${props}`,
+        { headers: this.headers() }
+      )
+      if (res.status === 404) return null
+      if (!res.ok) {
+        const raw = await res.text()
+        throw new ConnectorError(this.name, HubSpotErrorCode.CONTACT_SEARCH_FAILED, res.status, raw, `HubSpot getContactById failed for ${objectId}`)
+      }
+      const data = await res.json() as HubSpotContact
+      return data
+    })
+  }
+
   async updateContact(id: string, data: Partial<HubSpotContact>, idempotencyKey: string): Promise<void> {
     await withRetry(this.name, HubSpotErrorCode.CONTACT_UPDATE_FAILED, async () => {
       this.assertConnected()

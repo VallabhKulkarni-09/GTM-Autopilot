@@ -90,8 +90,22 @@ export const inboundLeadWorker = new Worker(
         new Date(formSubmittedAt).getTime() + slaMinutes * 60_000
       ).toISOString()
 
+      // ── Resolve contact properties ─────────────────────────────────────────
+      // Real HubSpot webhooks only contain objectId — no email/name.
+      // Fetch full contact from HubSpot API when properties are missing.
+      let properties = payload.properties ?? {}
+      if (!properties.email && payload.objectId) {
+        const { HubSpotConnector } = await import('../../connectors/hubspot/hubspot.connector.js')
+        const hs = new HubSpotConnector()
+        const apiKey = process.env.HUBSPOT_API_KEY
+        if (apiKey) {
+          await hs.connect({ apiKey, webhookSecret: process.env.HUBSPOT_WEBHOOK_SECRET ?? '' })
+          const contact = await hs.getContactById(payload.objectId)
+          if (contact?.properties) properties = contact.properties
+        }
+      }
+
       // ── Create lead record ────────────────────────────────────────────────────
-      const properties = payload.properties ?? {}
       const { data: lead, error: leadErr } = await db
         .from('leads')
         .insert({
