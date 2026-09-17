@@ -182,21 +182,43 @@ Lead 7 correctly paused for human review — no EMEA territory owner seeded, sys
 ## What Remains
 
 ```
+[x] Real Salesforce credentials → SF Lead creation + Task creation (DONE 2026-09-17)
+      SF Tasks: 00Tg7000008WLZVEA4, 00Tg7000008WY6nEAG, 00Tg7000008WdeLEAS
+      SF Leads: 00Qg700000HuTWeEAN, 00Qg700000HuiFuEAJ, 00Qg700000HwAtFEAV
+
+[ ] Real HubSpot webhook → end-to-end trigger chain proof
+      — Set HUBSPOT_API_KEY + HUBSPOT_WEBHOOK_SECRET in env
+      — Submit one real HubSpot form
+      — Verify: HMAC check ✓ → idempotency ✓ → BullMQ enqueue ✓ → play runs ✓
+      — This component (routes/webhooks.ts) is code-complete but untested with live traffic
+
+[ ] Real Clearbit enrichment
+      — No creds. Company data currently pre-seeded in demo scripts.
+      — Evidence store + enrichment node are code-complete; connector degrades gracefully.
+
+[ ] Outreach sequence enrollment
+      — No creds. Enrollment step currently skipped with console.warn.
+      — start_sequence node is code-complete; connector degrades gracefully.
+
 [ ] Production deploy
       — Railway: deploy Fastify API + BullMQ workers
       — Vercel: deploy dashboard/ (set NEXT_PUBLIC_API_URL + DASHBOARD_JWT)
       — Verify /api/metrics/overview returns real data
 
-[ ] Real HubSpot credentials → live webhook test
-      — Set HUBSPOT_API_KEY + HUBSPOT_WEBHOOK_SECRET
-      — Submit one real HubSpot form → watch play run in Supabase
-
-[ ] Real Salesforce credentials → SF task creation test
-      — Set SF_CLIENT_ID + SF_CLIENT_SECRET + SF_INSTANCE_URL
-      — Assign owner → verify SF Task created in Developer Edition
-
 [ ] Design partner sandbox goes live
 ```
+
+### Honest precision on what "proven" means
+
+The path **`runInboundLeadPlay()` → Supabase writes → real SF Lead + Task**
+is proven with real credentials and real SF Task IDs.
+
+The path **real HubSpot form → HMAC verify → BullMQ → worker → `runInboundLeadPlay()`**
+is code-complete but untested with live traffic. These are separate components.
+`runInboundLeadPlay()` was called directly in all demo runs.
+
+Company data (CloudBase Inc, DataFlow, RetailMega) was pre-seeded, not Clearbit-enriched.
+Clearbit enrichment is code-complete; it would replace the seeded data if credentials existed.
 
 ---
 
@@ -207,3 +229,4 @@ Lead 7 correctly paused for human review — no EMEA territory owner seeded, sys
 | After wave 3 merge (5 PRs) | 61 passing |
 | After wave 4 merge | 75 passing |
 | After demo fixes (2026-09-16) | **75 passing** (routing + qualification bugs fixed) |
+| After SF integration fixes (2026-09-17) | **75 passing** (account-match, find-or-create, Id casing) |
