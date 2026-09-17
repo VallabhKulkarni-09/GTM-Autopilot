@@ -14,7 +14,7 @@ _Last updated: 2026-09-17_
 ✅ Qualification agent v1 (rule-based, ICP scoring, hard gates, 10 tests)
 ✅ Routing agent v1 (rule-based, territory match, round-robin, 10 tests)
 ✅ Policy engine (9 operators, risk registry, validators)
-✅ Webhook receiver (HMAC → idempotency → BullMQ → 200ms) — LIVE TRAFFIC PROVEN
+✅ Webhook receiver (HMAC → idempotency → BullMQ → 200ms) — handler + worker path proven locally
 ✅ SLA timer + escalation worker
 ✅ Action executor (idempotency, try/finally event guarantee, 5 tests)
 ✅ Evidence store (Clearbit → evidence rows, 30-day expiry, 5 tests)
@@ -187,11 +187,15 @@ Lead 7 correctly paused for human review — no EMEA territory owner seeded, sys
       SF Tasks: 00Tg7000008WLZVEA4, 00Tg7000008WY6nEAG, 00Tg7000008WdeLEAS
       SF Leads: 00Qg700000HuTWeEAN, 00Qg700000HuiFuEAJ, 00Qg700000HwAtFEAV
 
-[x] Real HubSpot webhook → end-to-end trigger chain proof (DONE 2026-09-17)
-      HMAC-SHA256 verification: ✅ (valid → 200, bad sig → 401 in 155ms)
-      Idempotency (duplicate delivery): ✅ (200 duplicate on replay)
-      BullMQ enqueue → worker → runInboundLeadPlay: ✅ (11 events in Supabase)
-      Lead created via webhook: test.webhook@acme.com → stage=nurture, 11 events
+[~] Real HubSpot webhook → end-to-end trigger chain (PARTIALLY proven 2026-09-17)
+      ✅ HMAC verification code: valid sig → 200, bad sig → 401 in 155ms
+      ✅ Idempotency logic: duplicate eventId → 200 duplicate (after worker writes key)
+      ✅ BullMQ → worker → runInboundLeadPlay: 11 events in Supabase
+      ⚠️  HOW: script (b) — computed HMAC locally, POSTed directly to localhost:3000
+      ❌ NOT proven: HubSpot's servers calling the endpoint
+      ❌ NOT proven: real HubSpot payload shape matches parser
+      ❌ NOT proven: HUBSPOT_WEBHOOK_SECRET correctly set in HubSpot Private App UI
+      TODO: create a real HubSpot contact → watch their servers fire the webhook → confirm end-to-end
 
 [ ] Real Clearbit enrichment
       — No creds. Company data currently pre-seeded in demo scripts.
@@ -211,14 +215,20 @@ Lead 7 correctly paused for human review — no EMEA territory owner seeded, sys
 
 ### Honest precision on what "proven" means
 
-The path **`runInboundLeadPlay()` → Supabase writes → real SF Lead + Task**
-is proven with real credentials and real SF Task IDs.
+**`runInboundLeadPlay()` → Supabase writes → real SF Lead + Task:**
+Proven with real credentials and real SF Task IDs. This is the decision layer.
 
-The path **real HubSpot form → HMAC verify → BullMQ → worker → `runInboundLeadPlay()`**
-is code-complete but untested with live traffic. These are separate components.
-`runInboundLeadPlay()` was called directly in all demo runs.
+**HMAC verification + idempotency + BullMQ + worker + `runInboundLeadPlay()`:**
+Proven locally via script (b): a test script computed a valid HMAC and POSTed directly
+to `localhost:3000/webhooks/hubspot`. The handler, queue, and worker all worked correctly.
+NOT yet proven: HubSpot's actual servers firing a real webhook at the endpoint.
+`runInboundLeadPlay()` is now invoked by the worker, not called directly — but the
+trigger is still a local script, not a real HubSpot form submission.
 
-Company data (CloudBase Inc, DataFlow, RetailMega) was pre-seeded, not Clearbit-enriched.
+**To fully close this:** register the ngrok URL in HubSpot, create one real contact,
+confirm HubSpot's servers hit the endpoint and the payload parses correctly.
+
+**Company data** (CloudBase Inc, DataFlow, RetailMega) was pre-seeded, not Clearbit-enriched.
 Clearbit enrichment is code-complete; it would replace the seeded data if credentials existed.
 
 ---
