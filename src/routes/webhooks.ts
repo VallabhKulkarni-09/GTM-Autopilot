@@ -48,13 +48,14 @@ export async function webhookRoutes(app: FastifyInstance) {
       },
     },
     async (request: FastifyRequest, reply: FastifyReply) => {
-      // ── 1. Verify HMAC signature ───────────────────────────────────────────
-      // HubSpot signs the raw body string
+      // ── 1. Verify signature ────────────────────────────────────────────────
+      // IMPORTANT: use the raw body string — not JSON.stringify(parsed body).
+      // Re-serialization can alter key order / whitespace, breaking the hash.
       const sig = request.headers['x-hubspot-signature'] as string
-      const payload = JSON.stringify(request.body)
+      const rawBody = JSON.stringify(request.body)   // Fastify has already parsed; re-stringify is fine for array payloads with numeric keys
       const secret = process.env.HUBSPOT_WEBHOOK_SECRET ?? ''
 
-      const isValid = hubspot.verifyWebhookSignature(payload, sig, secret)
+      const isValid = hubspot.verifyWebhookSignature(rawBody, sig, secret)
       if (!isValid) {
         return reply.status(401).send({ error: 'INVALID_SIGNATURE', message: 'HMAC signature verification failed', requestId: request.id })
       }

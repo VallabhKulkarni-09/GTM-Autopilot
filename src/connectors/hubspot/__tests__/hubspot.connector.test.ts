@@ -5,7 +5,7 @@
  */
 
 import { describe, it, expect, beforeAll } from 'vitest'
-import { createHmac } from 'crypto'
+import { createHash, createHmac } from 'crypto'
 import { HubSpotConnector } from '../hubspot.connector.js'
 import { ConnectorError } from '../../base.js'
 
@@ -17,7 +17,8 @@ describe('HubSpotConnector.verifyWebhookSignature (pure crypto)', () => {
   const connector = new HubSpotConnector()
   const secret = 'test-secret-12345'
   const payload = JSON.stringify({ eventId: 'abc', subscriptionType: 'contact.creation' })
-  const validSig = createHmac('sha256', secret).update(payload).digest('hex')
+  // HubSpot v1: SHA256(secret + rawBody) — NOT HMAC
+  const validSig = createHash('sha256').update(secret + payload).digest('hex')
 
   it('returns true for a valid signature', () => {
     expect(connector.verifyWebhookSignature(payload, validSig, secret)).toBe(true)

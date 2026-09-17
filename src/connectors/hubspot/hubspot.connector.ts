@@ -4,7 +4,7 @@
  * Credentials: HUBSPOT_API_KEY, HUBSPOT_WEBHOOK_SECRET
  */
 
-import { createHmac, timingSafeEqual } from 'crypto'
+import { createHash, createHmac, timingSafeEqual } from 'crypto'
 import { Connector, ConnectorError, ConnectorHealth, withRetry } from '../base.js'
 import { HubSpotErrorCode } from './hubspot.errors.js'
 import type { HubSpotConfig, HubSpotContact, HubSpotSearchResponse } from './hubspot.types.js'
@@ -86,12 +86,18 @@ export class HubSpotConnector implements Connector<HubSpotConfig> {
 
   /**
    * SYNCHRONOUS. Pure crypto — never async, never calls HubSpot API.
-   * Returns true if HMAC-SHA256 of payload matches signature.
+   *
+   * HubSpot v1 signature (x-hubspot-signature):
+   *   SHA-256( clientSecret + rawRequestBody )
+   *   NOT an HMAC — a plain hash of the concatenation.
+   *
+   * Reference: https://developers.hubspot.com/docs/api/webhooks#validate-requests
    */
   verifyWebhookSignature(payload: string, signature: string, secret: string): boolean {
     if (!payload || !signature || !secret) return false
     try {
-      const expected = createHmac('sha256', secret).update(payload).digest('hex')
+      // HubSpot v1: SHA256(secret + body) — simple hash, not HMAC
+      const expected = createHash('sha256').update(secret + payload).digest('hex')
       const sigBuf = Buffer.from(signature, 'hex')
       const expBuf = Buffer.from(expected, 'hex')
       if (sigBuf.length !== expBuf.length) return false

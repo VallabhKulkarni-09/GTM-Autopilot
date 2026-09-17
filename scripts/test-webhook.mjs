@@ -17,7 +17,7 @@
  *   node scripts/test-webhook.mjs --bad-sig     # force 401 (wrong secret)
  */
 
-import { createHmac } from 'crypto'
+import { createHash, createHmac } from 'crypto'
 
 const PORT    = process.env.PORT ?? 3000
 const SECRET  = process.env.HUBSPOT_WEBHOOK_SECRET ?? ''
@@ -52,7 +52,7 @@ const body = JSON.stringify(payload)
 
 const sig = BAD_SIG
   ? 'deadbeef0000000000000000000000000000000000000000000000000000dead'
-  : createHmac('sha256', SECRET).update(body).digest('hex')
+  : createHash('sha256').update(SECRET + body).digest('hex')
 
 const url = `http://localhost:${PORT}/webhooks/hubspot`
 
