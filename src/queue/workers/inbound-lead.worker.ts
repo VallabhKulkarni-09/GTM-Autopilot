@@ -101,8 +101,20 @@ export const inboundLeadWorker = new Worker(
         if (apiKey) {
           await hs.connect({ apiKey, webhookSecret: process.env.HUBSPOT_WEBHOOK_SECRET ?? '' })
           const contact = await hs.getContactById(payload.objectId)
-          if (contact?.properties) properties = contact.properties
+          if (contact?.properties) {
+            properties = contact.properties
+          } else {
+            // Contact not found (deleted?) or has no properties — skip gracefully
+            console.warn(`[inbound-lead-worker] Contact ${payload.objectId} not found in HubSpot (404 or deleted) — skipping job`)
+            return
+          }
         }
+      }
+
+      // Guard: email is required to create a lead
+      if (!properties.email) {
+        console.warn(`[inbound-lead-worker] Contact ${payload.objectId} has no email — skipping job (HubSpot contacts require email)`)
+        return
       }
 
       // ── Create lead record ────────────────────────────────────────────────────
