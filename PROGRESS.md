@@ -1,12 +1,12 @@
 # GTM Autopilot — PROGRESS.md
-_Last updated: 2026-09-16_
+_Last updated: 2026-09-17_
 
 ---
 
 ## Current State
 
 ```
-✅ Schema (migrations 001–016)
+✅ Schema (migrations 001–017)
 ✅ Domain types (src/domain/db-types.ts)
 ✅ 4 connectors: Salesforce, HubSpot, Outreach, Clearbit (graceful degradation)
 ✅ Tenant context middleware
@@ -21,10 +21,28 @@ _Last updated: 2026-09-16_
 ✅ Context builder (DecisionSnapshot assembly, 2 tests)
 ✅ LangGraph inbound-lead workflow (4 paths tested)
 ✅ Dashboard (Next.js 15, 4 pages: overview / leads / lead detail / settings)
-✅ DEMO PROVEN: 7 real-world lead scenarios on live Supabase — 0 failures
+✅ LIVE SF INTEGRATION PROVEN: 7 scenarios, 0 failures, real SF Tasks in production org
 ```
 
 **Test suite: 75 passing | 0 failing | 25 skipped (live credentials)**
+
+---
+
+## Live Salesforce Proof (2026-09-17)
+
+**Org:** `orgfarm-78e1e3f00b-dev-ed.develop.my.salesforce.com` | Owner: CD Termux (`005g700000B9EAHAA3`)
+
+| Lead | Score | Tier | Stage | Play | SF Task ID |
+|---|---|---|---|---|---|
+| Sarah Chen (CTO, CloudBase Inc) | 100 | tier_1 | in_sequence | completed | `00Tg7000008WLZVEA4` |
+| Marcus Webb (VP Sales, DataFlow) | 100 | tier_1 | in_sequence | completed | `00Tg7000008WY6nEAG` |
+| Priya Nair (8-person startup) | 0 | not_icp | nurture | nurture | — CRM untouched |
+| Anonymous (gmail.com) | 0 | not_icp | nurture | nurture | — CRM untouched |
+| Sarah Chen (duplicate) | — | — | new | completed | — blocked |
+| Alex Torres (RetailMega, SLA) | 90 | tier_1 | in_sequence | completed | `00Tg7000008WdeLEAS` |
+| Jamie Park (EMEA, GB) | 100 | tier_1 | routing | paused | — human review |
+
+**Connectors active:** Salesforce ✅ | Outreach ⚠️ (no creds) | Clearbit ⚠️ (no creds) | HubSpot ⚠️ (no webhook yet)
 
 ---
 
