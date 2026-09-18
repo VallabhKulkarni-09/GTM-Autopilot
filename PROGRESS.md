@@ -187,18 +187,17 @@ Lead 7 correctly paused for human review — no EMEA territory owner seeded, sys
       SF Tasks: 00Tg7000008WLZVEA4, 00Tg7000008WY6nEAG, 00Tg7000008WdeLEAS
       SF Leads: 00Qg700000HuTWeEAN, 00Qg700000HuiFuEAJ, 00Qg700000HwAtFEAV
 
-[~] Real HubSpot webhook → end-to-end trigger chain (MOSTLY proven 2026-09-17)
-      ✅ HubSpot's servers firing at ngrok endpoint: confirmed (real 200 responses via ngrok host header)
-      ✅ HMAC verification with real HubSpot signature: proven (was SHA256(secret+body), not HMAC)
-      ✅ Array payload format: HubSpot sends [{eventId, objectId, ...}] not {}, fixed + confirmed
-      ✅ Idempotency: 200 duplicate on replay, confirmed
-      ✅ objectId → getContactById → email → lead → play: PROVEN (Maria Johnson sample contact,
-         emailmaria@hubspot.com, objectId=553861362381, lead id=37534c0d in Supabase, stage=nurture)
-      ⚠️  Private App missing crm.objects.contacts.read scope for user-created contacts
-          — API returns only the 2 HubSpot sample contacts; user-created contacts (Alex Johnson,
-            John Doe, Jane Smith etc.) return 404 when fetched by objectId from webhook
-          — FIX: HubSpot → Settings → Private Apps → GTM Autopilot → Scopes → enable crm.objects.contacts.read
-      ❌ NOT proven: full chain with a real user-created contact (blocked by scope gap above)
+[x] Real HubSpot webhook → end-to-end trigger chain (FULLY PROVEN 2026-09-18)
+      ✅ HubSpot servers (portal 247417540) fired webhook to ngrok endpoint
+      ✅ HMAC SHA256(secret+body) verified — real signature passed
+      ✅ Array payload [{eventId, objectId, ...}] parsed correctly
+      ✅ Idempotency: duplicate eventId returns 200 duplicate
+      ✅ Worker called getContactById(objectId) → fetched email from HubSpot API
+      ✅ Lead created: Yashasvi U <yashasvi@infosys.com>, source=hubspot:contact.creation
+      ✅ Play ran: 11 events in event_log, stage=nurture
+      NOTE: HUBSPOT_API_KEY must match portal where contacts + webhook subscription live (247417540).
+            Old key (pat-na2-633e0bcd) was for developer test portal (247417606) — caused contact 404s.
+
 
 [ ] Real Clearbit enrichment
       — No creds. Company data currently pre-seeded in demo scripts.
