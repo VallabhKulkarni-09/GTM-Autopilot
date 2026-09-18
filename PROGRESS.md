@@ -187,15 +187,18 @@ Lead 7 correctly paused for human review — no EMEA territory owner seeded, sys
       SF Tasks: 00Tg7000008WLZVEA4, 00Tg7000008WY6nEAG, 00Tg7000008WdeLEAS
       SF Leads: 00Qg700000HuTWeEAN, 00Qg700000HuiFuEAJ, 00Qg700000HwAtFEAV
 
-[~] Real HubSpot webhook → end-to-end trigger chain (PARTIALLY proven 2026-09-17)
-      ✅ HMAC verification code: valid sig → 200, bad sig → 401 in 155ms
-      ✅ Idempotency logic: duplicate eventId → 200 duplicate (after worker writes key)
-      ✅ BullMQ → worker → runInboundLeadPlay: 11 events in Supabase
-      ⚠️  HOW: script (b) — computed HMAC locally, POSTed directly to localhost:3000
-      ❌ NOT proven: HubSpot's servers calling the endpoint
-      ❌ NOT proven: real HubSpot payload shape matches parser
-      ❌ NOT proven: HUBSPOT_WEBHOOK_SECRET correctly set in HubSpot Private App UI
-      TODO: create a real HubSpot contact → watch their servers fire the webhook → confirm end-to-end
+[~] Real HubSpot webhook → end-to-end trigger chain (MOSTLY proven 2026-09-17)
+      ✅ HubSpot's servers firing at ngrok endpoint: confirmed (real 200 responses via ngrok host header)
+      ✅ HMAC verification with real HubSpot signature: proven (was SHA256(secret+body), not HMAC)
+      ✅ Array payload format: HubSpot sends [{eventId, objectId, ...}] not {}, fixed + confirmed
+      ✅ Idempotency: 200 duplicate on replay, confirmed
+      ✅ objectId → getContactById → email → lead → play: PROVEN (Maria Johnson sample contact,
+         emailmaria@hubspot.com, objectId=553861362381, lead id=37534c0d in Supabase, stage=nurture)
+      ⚠️  Private App missing crm.objects.contacts.read scope for user-created contacts
+          — API returns only the 2 HubSpot sample contacts; user-created contacts (Alex Johnson,
+            John Doe, Jane Smith etc.) return 404 when fetched by objectId from webhook
+          — FIX: HubSpot → Settings → Private Apps → GTM Autopilot → Scopes → enable crm.objects.contacts.read
+      ❌ NOT proven: full chain with a real user-created contact (blocked by scope gap above)
 
 [ ] Real Clearbit enrichment
       — No creds. Company data currently pre-seeded in demo scripts.
