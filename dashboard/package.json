@@ -1,4 +1,13 @@
 {
+  "name": "gtm-autopilot-dashboard",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "next lint"
+  },
   "dependencies": {
     "@radix-ui/react-select": "^2.3.7",
     "@radix-ui/react-slot": "^1.3.3",
@@ -12,7 +21,7 @@
     "react": "^19.2.8",
     "react-dom": "^19.2.8",
     "tailwind-merge": "^3.6.0",
-    "typescript": "^7.0.2"
+    "typescript": "5.8.3"
   },
   "devDependencies": {
     "autoprefixer": "^10.5.5",
