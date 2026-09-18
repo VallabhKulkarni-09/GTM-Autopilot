@@ -57,5 +57,10 @@ export function buildApp() {
   app.register(connectorRoutes, { prefix: '/api/connectors' })
   app.register(policyRoutes,    { prefix: '/api/policies' })
 
+  // ─── Health check — required by Railway ───────────────────────────────────
+  app.get('/health', { logLevel: 'silent' }, async (_req, reply) => {
+    return reply.status(200).send({ status: 'ok', version: process.env.npm_package_version ?? '0.0.1', uptime: process.uptime() })
+  })
+
   return app
 }
