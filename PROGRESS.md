@@ -243,3 +243,35 @@ Clearbit enrichment is code-complete; it would replace the seeded data if creden
 | After wave 4 merge | 75 passing |
 | After demo fixes (2026-09-16) | **75 passing** (routing + qualification bugs fixed) |
 | After SF integration fixes (2026-09-17) | **75 passing** (account-match, find-or-create, Id casing) |
+
+---
+
+## Production Deployment (2026-09-21)
+
+### Railway (API + Worker + Redis)
+[x] gtm-api service — Fastify API server
+      URL: https://gtm-api-production-adc0.up.railway.app
+      Health: GET /health → {"status":"ok"}
+      Auto-deploys on push to main
+[x] gtm-worker service — BullMQ inbound-lead worker
+      Persistent process, picks up jobs from Railway Redis
+      Auto-deploys on push to main
+[x] Redis — Railway managed Redis
+      REDIS_URL injected via Railway reference variable ${{Redis.REDIS_URL}}
+
+### Vercel (Dashboard)
+[x] gtm-autopilot-dashboard
+      URL: https://gtm-autopilot-dashboard.vercel.app
+      Routes: / → /dashboard, /leads, /leads/[id], /settings
+      All pages force-dynamic (server-rendered on request, not prerendered)
+      DASHBOARD_JWT + NEXT_PUBLIC_API_URL set in Vercel project settings
+      Auto-deploys on push to main
+
+### HubSpot Webhook (Production)
+[x] Webhook URL updated in portal 247417540 → Private Apps → GTM Autopilot
+      Old: ngrok URL (ephemeral, changed on restart)
+      New: https://gtm-api-production-adc0.up.railway.app/webhooks/hubspot (permanent)
+
+### What ngrok was replaced with
+      ngrok was only needed for local dev. Railway provides a permanent stable URL.
+      No more manual ngrok restarts or webhook URL updates needed.
