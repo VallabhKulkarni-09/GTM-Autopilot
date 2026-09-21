@@ -5,6 +5,8 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/com
 import { Badge } from '@/components/ui/badge'
 import { SlaForm } from './sla-form'
 
+export const dynamic = 'force-dynamic'
+
 const STATUS_COLORS: Record<string, string> = {
   healthy: 'bg-emerald-500',
   degraded: 'bg-amber-500',

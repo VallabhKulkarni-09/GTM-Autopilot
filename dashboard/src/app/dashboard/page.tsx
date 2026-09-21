@@ -4,6 +4,8 @@ import { OverviewMetrics, SpeedToLeadDistribution } from '@/types/api'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { SdrTable } from './sdr-table'
 
+export const dynamic = 'force-dynamic'
+
 export default async function DashboardPage() {
   let overview: OverviewMetrics
   let distribution: SpeedToLeadDistribution

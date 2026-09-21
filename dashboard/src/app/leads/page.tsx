@@ -6,6 +6,8 @@ import { Badge } from '@/components/ui/badge'
 import Link from 'next/link'
 import { LeadsFilter } from './leads-filter'
 
+export const dynamic = 'force-dynamic'
+
 const STAGE_COLORS: Record<string, string> = {
   new: 'bg-gray-100 text-gray-800',
   enriching: 'bg-blue-100 text-blue-800',

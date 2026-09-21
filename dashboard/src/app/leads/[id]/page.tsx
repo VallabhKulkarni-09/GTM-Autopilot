@@ -3,6 +3,8 @@ import { getServerToken } from '@/lib/auth'
 import { Lead, TimelineEvent } from '@/types/api'
 import { Badge } from '@/components/ui/badge'
 
+export const dynamic = 'force-dynamic'
+
 const EVENT_LABELS: Record<string, string> = {
   'webhook_received':              'Form submission received',
   'enrichment_requested':          'Enrichment started',
