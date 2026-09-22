@@ -53,8 +53,30 @@ export default async function LeadDetailPage({ params }: { params: Promise<{ id:
     
     if (!leadRes.ok || !timelineRes.ok) throw new Error('Failed to fetch')
     
-    lead = await leadRes.json()
-    timeline = await timelineRes.json()
+    // API returns { lead: {...}, currentPlay: {...} } — unwrap
+    const { lead: leadData } = await leadRes.json()
+    lead = leadData
+
+    // Timeline: raw event_log rows — map to TimelineEvent shape
+    const rawTimeline: any[] = await timelineRes.json()
+    timeline = rawTimeline.map(e => ({
+      id: e.id,
+      timestamp: e.occurred_at,
+      event_type: e.event_type,
+      actor: e.actor_type === 'webhook'
+        ? 'HubSpot Webhook'
+        : e.actor_type === 'system'
+          ? (e.agent_name ?? 'System')
+          : (e.actor_type ?? 'System'),
+      decision_risk_score: e.proposed_action?.decisionRiskScore ?? undefined,
+      reason_codes: e.proposed_action?.rationale?.reasonCodes ?? undefined,
+      policy_name: e.policy_name ?? undefined,
+      policy_passed: e.policy_passed ?? undefined,
+      error_code: e.error_code ?? undefined,
+      external_confirmation: e.external_id
+        ? `${e.external_system}: ${e.external_id}`
+        : undefined,
+    }))
   } catch (error) {
     // Mock data for UI building
     lead = { id, company: 'Acme Corp', name: 'John Doe', title: 'CEO', stage: 'in_sequence', timeToFirstTouchMin: 12, assignedTo: 'Alice', formSubmittedAt: new Date(Date.now() - 3600000).toISOString() }
@@ -79,7 +101,8 @@ export default async function LeadDetailPage({ params }: { params: Promise<{ id:
         <div className="flex justify-between items-start">
           <div>
             <h1 className="text-3xl font-bold mb-2">{lead.name}</h1>
-            <div className="text-xl text-gray-600 mb-4">{lead.title} at {lead.company}</div>
+            <div className="text-xl text-gray-600 mb-1">{lead.title ?? lead.email}</div>
+            <div className="text-sm text-gray-400 mb-3">{lead.email}</div>
             <div className="text-sm text-gray-500">
               Form submitted: {new Date(lead.formSubmittedAt).toLocaleString()}
             </div>
