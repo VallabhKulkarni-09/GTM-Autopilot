@@ -34,7 +34,8 @@ export interface SpeedToLeadDistribution {
 
 export interface Lead {
   id: string;
-  company: string;
+  email?: string;
+  company?: string;
   name: string;
   title: string;
   stage: LeadStage;
