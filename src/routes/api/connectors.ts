@@ -36,7 +36,12 @@ export async function connectorRoutes(app: FastifyInstance) {
       return { name: names[i], ok: false, error: String((r as any).reason), latencyMs: 0, lastChecked: new Date() }
     })
 
-    return reply.send({ connectors: statuses })
+    // Map to ConnectorHealth shape: ok→status, unwrap from object wrapper
+    return reply.send(statuses.map(s => ({
+      name: s.name,
+      status: s.ok ? 'healthy' : 'unhealthy' as 'healthy' | 'unhealthy',
+      lastChecked: typeof s.lastChecked === 'string' ? s.lastChecked : new Date(s.lastChecked).toISOString(),
+    })))
   })
 }
 

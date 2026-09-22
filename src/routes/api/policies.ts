@@ -29,7 +29,7 @@ export async function policyRoutes(app: FastifyInstance) {
     const from = (page - 1) * limit
     let query = getDb()
       .from('policy_rules')
-      .select('id, rule_type, name, description, priority, is_active, created_at, updated_at', { count: 'exact' })
+      .select('id, rule_type, name, description, conditions, actions, priority, is_active, created_at, updated_at', { count: 'exact' })
       .eq('organization_id', organizationId)
       .order('priority', { ascending: true })
       .range(from, from + limit - 1)
@@ -46,12 +46,17 @@ export async function policyRoutes(app: FastifyInstance) {
       })
     }
 
-    return reply.send({
-      data: data ?? [],
-      total: count ?? 0,
-      page,
-      limit,
-    })
+    // Map DB rows to PolicyRule shape matching dashboard types/api.ts
+    const rules = (data ?? []).map((row: any) => ({
+      id: row.id,
+      rule_type: row.rule_type,
+      name: row.name,
+      conditions_summary: row.description ?? row.name,
+      sla_minutes: row.conditions?.sla_minutes ?? row.conditions?.minutes ?? undefined,
+      queue_assigned: row.actions?.queue_name ?? row.actions?.queue ?? undefined,
+    }))
+
+    return reply.send(rules)
   })
 
   // ── PUT /api/policies/:id ──────────────────────────────────────────────────
