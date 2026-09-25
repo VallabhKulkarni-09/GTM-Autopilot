@@ -1,51 +1,83 @@
-'use client';
+'use client'
 
-import { useRouter, useSearchParams } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation'
+
+const STAGE_OPTIONS = [
+  { value: 'all',            label: 'All' },
+  { value: 'new',            label: 'New' },
+  { value: 'routing',        label: 'Routing' },
+  { value: 'in_sequence',    label: 'In Sequence' },
+  { value: 'meeting_booked', label: 'Meeting Booked' },
+  { value: 'nurture',        label: 'Nurture' },
+  { value: 'lost',           label: 'Lost' },
+]
+
+const DATE_OPTIONS = [
+  { value: 'all', label: 'All time' },
+  { value: '7d',  label: 'Last 7 days' },
+  { value: '30d', label: 'Last 30 days' },
+]
 
 export function LeadsFilter() {
-  const router = useRouter();
-  const searchParams = useSearchParams();
-  
-  const stage = searchParams.get('stage') || 'all';
-  const dateRange = searchParams.get('dateRange') || 'all';
+  const router = useRouter()
+  const searchParams = useSearchParams()
+
+  const stage = searchParams.get('stage') || 'all'
+  const dateRange = searchParams.get('dateRange') || 'all'
 
   const updateFilter = (key: string, value: string) => {
-    const params = new URLSearchParams(searchParams.toString());
+    const params = new URLSearchParams(searchParams.toString())
     if (value === 'all') {
-      params.delete(key);
+      params.delete(key)
     } else {
-      params.set(key, value);
+      params.set(key, value)
     }
-    params.set('page', '1'); // reset page
-    router.push(`/leads?${params.toString()}`);
-  };
+    params.set('page', '1')
+    router.push(`/leads?${params.toString()}`)
+  }
 
   return (
-    <div className="flex gap-4 mb-6">
-      <select 
-        value={stage}
-        onChange={(e) => updateFilter('stage', e.target.value)}
-        className="border p-2 rounded"
-      >
-        <option value="all">All Stages</option>
-        <option value="new">New</option>
-        <option value="enriching">Enriching</option>
-        <option value="routing">Routing</option>
-        <option value="in_sequence">In Sequence</option>
-        <option value="meeting_booked">Meeting Booked</option>
-        <option value="nurture">Nurture</option>
-        <option value="lost">Lost</option>
-      </select>
-      
-      <select 
-        value={dateRange}
-        onChange={(e) => updateFilter('dateRange', e.target.value)}
-        className="border p-2 rounded"
-      >
-        <option value="all">All Time</option>
-        <option value="7d">Last 7 Days</option>
-        <option value="30d">Last 30 Days</option>
-      </select>
+    <div className="flex flex-wrap items-center gap-6 mb-6">
+      {/* Stage pill filters */}
+      <div className="flex flex-wrap items-center gap-1.5">
+        {STAGE_OPTIONS.map(opt => (
+          <button
+            key={opt.value}
+            onClick={() => updateFilter('stage', opt.value)}
+            className={`
+              px-3 py-1.5 rounded-full text-xs font-semibold transition-all duration-100
+              ${stage === opt.value
+                ? 'bg-blue-600 text-white shadow-sm'
+                : 'bg-white border border-gray-200 text-gray-600 hover:border-blue-300 hover:text-blue-700'
+              }
+            `}
+          >
+            {opt.label}
+          </button>
+        ))}
+      </div>
+
+      {/* Divider */}
+      <div className="w-px h-5 bg-gray-200 hidden sm:block" />
+
+      {/* Date range pills */}
+      <div className="flex items-center gap-1.5">
+        {DATE_OPTIONS.map(opt => (
+          <button
+            key={opt.value}
+            onClick={() => updateFilter('dateRange', opt.value)}
+            className={`
+              px-3 py-1.5 rounded-full text-xs font-semibold transition-all duration-100
+              ${dateRange === opt.value
+                ? 'bg-gray-900 text-white shadow-sm'
+                : 'bg-white border border-gray-200 text-gray-600 hover:border-gray-400 hover:text-gray-900'
+              }
+            `}
+          >
+            {opt.label}
+          </button>
+        ))}
+      </div>
     </div>
-  );
+  )
 }

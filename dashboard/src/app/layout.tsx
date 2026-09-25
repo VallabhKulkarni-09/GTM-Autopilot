@@ -1,28 +1,27 @@
 import type { Metadata } from 'next'
 import './globals.css'
+import { SidebarNav } from '@/components/sidebar-nav'
 
 export const metadata: Metadata = {
-  title: 'GTM Autopilot Dashboard',
+  title: 'GTM Autopilot',
   description: 'GTM Decision Infrastructure',
 }
 
-export default function RootLayout({
-  children,
-}: {
-  children: React.ReactNode
-}) {
+export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="en">
-      <body className="antialiased bg-gray-50 text-gray-900 min-h-screen">
-        <nav className="border-b bg-white px-6 py-3 flex items-center space-x-6">
-          <div className="font-bold text-lg mr-4">GTM Autopilot</div>
-          <a href="/dashboard" className="text-gray-600 hover:text-gray-900">Dashboard</a>
-          <a href="/leads" className="text-gray-600 hover:text-gray-900">Leads</a>
-          <a href="/settings" className="text-gray-600 hover:text-gray-900">Settings</a>
-        </nav>
-        <main className="p-8 max-w-7xl mx-auto">
-          {children}
-        </main>
+      <body className="antialiased bg-[#F9FAFB] text-[#1C1C1E] min-h-screen" style={{ fontFamily: "-apple-system, BlinkMacSystemFont, 'Inter', 'Segoe UI', sans-serif" }}>
+        <div className="flex min-h-screen">
+          {/* Left sidebar */}
+          <SidebarNav />
+
+          {/* Main content */}
+          <main className="flex-1 ml-60 p-8 max-w-[calc(100vw-240px)]">
+            <div className="max-w-6xl mx-auto">
+              {children}
+            </div>
+          </main>
+        </div>
       </body>
     </html>
   )

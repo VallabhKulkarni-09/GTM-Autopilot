@@ -30,6 +30,7 @@ export interface SpeedToLeadDistribution {
     under15MinPct: number;
     meetingsBooked: number;
   }[];
+  total: number;
 }
 
 export interface Lead {
