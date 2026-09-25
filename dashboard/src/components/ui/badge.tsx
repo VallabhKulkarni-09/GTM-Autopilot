@@ -1,20 +1,36 @@
 import * as React from "react"
 import { cva, type VariantProps } from "class-variance-authority"
-
 import { cn } from "@/lib/utils"
 
 const badgeVariants = cva(
-  "inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-semibold transition-colors focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2",
+  // Base — Apple-style label
+  [
+    "inline-flex items-center rounded-full px-2.5 py-[3px]",
+    "text-[11px] font-semibold leading-none",
+    "transition-colors duration-150",
+    "focus:outline-none focus:ring-2 focus:ring-[#007AFF] focus:ring-offset-2",
+  ].join(" "),
   {
     variants: {
       variant: {
+        // Translucent blue — primary label
         default:
-          "border-transparent bg-primary text-primary-foreground hover:bg-primary/80",
+          "bg-[rgba(0,122,255,0.12)] text-[#007AFF] border-transparent",
+        // Translucent gray — secondary label
         secondary:
-          "border-transparent bg-secondary text-secondary-foreground hover:bg-secondary/80",
+          "bg-[rgba(0,0,0,0.06)] text-[rgba(0,0,0,0.60)] border-transparent",
+        // Translucent red — destructive
         destructive:
-          "border-transparent bg-destructive text-destructive-foreground hover:bg-destructive/80",
-        outline: "text-foreground",
+          "bg-[rgba(255,59,48,0.12)] text-[#FF3B30] border-transparent",
+        // Outline — subtle border
+        outline:
+          "border border-[rgba(0,0,0,0.15)] text-[rgba(0,0,0,0.65)] bg-transparent",
+        // Success green
+        success:
+          "bg-[rgba(52,199,89,0.12)] text-[#34C759] border-transparent",
+        // Warning orange
+        warning:
+          "bg-[rgba(255,149,0,0.12)] text-[#FF9500] border-transparent",
       },
     },
     defaultVariants: {

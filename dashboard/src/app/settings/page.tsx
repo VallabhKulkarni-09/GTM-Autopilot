@@ -2,15 +2,15 @@ import { apiFetch } from '@/lib/api'
 import { getServerToken } from '@/lib/auth'
 import { ConnectorHealth, PolicyRule } from '@/types/api'
 import { SlaForm } from './sla-form'
-import { CheckCircle2, XCircle, AlertTriangle, Globe, ArrowRight } from 'lucide-react'
+import { CheckCircle2, XCircle, Globe, ArrowRight, AlertTriangle } from 'lucide-react'
 
 export const dynamic = 'force-dynamic'
 
-const CONNECTOR_DISPLAY: Record<string, { label: string; description: string }> = {
-  hubspot:    { label: 'HubSpot',    description: 'Inbound webhook source' },
-  salesforce: { label: 'Salesforce', description: 'CRM & task creation' },
-  outreach:   { label: 'Outreach',   description: 'Sequence enrollment' },
-  clearbit:   { label: 'Clearbit',   description: 'Lead enrichment' },
+const CONNECTOR_DISPLAY: Record<string, { label: string; description: string; emoji: string }> = {
+  hubspot:    { label: 'HubSpot',    description: 'Inbound webhook source',  emoji: '🟠' },
+  salesforce: { label: 'Salesforce', description: 'CRM & task creation',     emoji: '🔵' },
+  outreach:   { label: 'Outreach',   description: 'Sequence enrollment',     emoji: '🟣' },
+  clearbit:   { label: 'Clearbit',   description: 'Lead enrichment',         emoji: '🟡' },
 }
 
 export default async function SettingsPage() {
@@ -19,79 +19,117 @@ export default async function SettingsPage() {
   const token = getServerToken()
 
   try {
-    const [connRes, polRes] = await Promise.all([
+    const [cr, pr] = await Promise.all([
       apiFetch('/api/connectors', token),
-      apiFetch('/api/policies', token),
+      apiFetch('/api/policies',   token),
     ])
-    if (!connRes.ok || !polRes.ok) throw new Error('Failed to fetch')
-    connectors = await connRes.json()
-    policies = await polRes.json()
-  } catch (error: any) {
+    if (!cr.ok || !pr.ok) throw new Error('Failed')
+    connectors = await cr.json()
+    policies   = await pr.json()
+  } catch (e: any) {
     return (
-      <div className="flex flex-col gap-6">
-        <h1 className="text-2xl font-bold text-gray-900">System Health</h1>
-        <div className="rounded-2xl border border-red-100 bg-red-50 p-6 text-red-800 flex items-start gap-3">
-          <AlertTriangle className="w-5 h-5 mt-0.5 flex-shrink-0" />
+      <div className="flex flex-col gap-6 animate-fade-in">
+        <h1 className="text-[28px] font-bold tracking-tight" style={{ color: 'var(--apple-text-primary)' }}>
+          System Health
+        </h1>
+        <div
+          className="rounded-2xl p-5 flex items-start gap-3"
+          style={{ background: 'rgba(255,59,48,0.07)', border: '1px solid rgba(255,59,48,0.15)' }}
+        >
+          <AlertTriangle size={18} className="mt-0.5 flex-shrink-0" style={{ color: 'var(--apple-red)' }} />
           <div>
-            <div className="font-semibold mb-1">Settings Unavailable</div>
-            <div className="text-sm">{error?.message ?? 'Failed to load settings'}</div>
+            <div className="text-[15px] font-semibold" style={{ color: 'var(--apple-red)' }}>Unavailable</div>
+            <div className="text-[13px] mt-1" style={{ color: 'var(--apple-text-secondary)' }}>
+              {e?.message ?? 'Failed to load settings'}
+            </div>
           </div>
         </div>
       </div>
     )
   }
 
-  const slaPolicy = policies.find(p => p.rule_type === 'sla')
+  const slaPolicy      = policies.find(p => p.rule_type === 'sla')
   const territoryRules = policies.filter(p => p.rule_type === 'territory')
-
-  const healthyCount = connectors.filter(c => c.status === 'healthy').length
-  const totalCount = connectors.length
+  const healthyCount   = connectors.filter(c => c.status === 'healthy').length
 
   return (
-    <div className="flex flex-col gap-8 max-w-3xl">
-      {/* Header */}
+    <div className="flex flex-col gap-7 max-w-2xl animate-fade-in">
+
+      {/* ── Page header ─────────────────────────────────────────── */}
       <div>
-        <h1 className="text-2xl font-bold text-gray-900">System Health</h1>
-        <p className="text-sm text-gray-400 mt-0.5">
-          {healthyCount}/{totalCount} connectors healthy · Policies v1
+        <h1 className="text-[28px] font-bold tracking-tight" style={{ color: 'var(--apple-text-primary)' }}>
+          System Health
+        </h1>
+        <p className="text-[13px] mt-1" style={{ color: 'var(--apple-text-tertiary)' }}>
+          {healthyCount}/{connectors.length} connectors healthy · Policies v1
         </p>
       </div>
 
-      {/* Connectors */}
+      {/* ── Connectors — iOS Inset Grouped List ─────────────────── */}
       <section>
-        <div className="text-xs font-semibold uppercase tracking-wider text-gray-400 mb-3">Connectors</div>
-        <div className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden">
+        <div
+          className="text-[11px] font-semibold uppercase tracking-[0.07em] mb-2 px-1"
+          style={{ color: 'var(--apple-text-tertiary)' }}
+        >
+          Connectors
+        </div>
+
+        {/* Inset group wrapper */}
+        <div className="apple-inset-group">
           {connectors.map((conn, i) => {
-            const display = CONNECTOR_DISPLAY[conn.name] ?? { label: conn.name, description: '' }
-            const isHealthy = conn.status === 'healthy'
+            const display = CONNECTOR_DISPLAY[conn.name] ?? { label: conn.name, description: '', emoji: '⚪' }
+            const isOk    = conn.status === 'healthy'
             return (
               <div
                 key={conn.name}
-                className={`flex items-center gap-4 px-5 py-4 ${i < connectors.length - 1 ? 'border-b border-gray-50' : ''}`}
+                className="apple-inset-row"
+                style={{
+                  borderRadius:
+                    i === 0 && connectors.length === 1 ? '10px'
+                    : i === 0 ? '10px 10px 0 0'
+                    : i === connectors.length - 1 ? '0 0 10px 10px'
+                    : '0',
+                }}
               >
-                {/* Status dot */}
-                <div className={`w-2.5 h-2.5 rounded-full flex-shrink-0 ${isHealthy ? 'bg-emerald-500' : 'bg-red-400'}`} />
+                {/* Icon area */}
+                <div
+                  className="w-9 h-9 rounded-[10px] flex items-center justify-center flex-shrink-0 text-[18px]"
+                  style={{
+                    background: isOk ? 'rgba(52,199,89,0.10)' : 'rgba(255,59,48,0.08)',
+                    boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.5)',
+                  }}
+                >
+                  {display.emoji}
+                </div>
 
                 {/* Info */}
                 <div className="flex-1 min-w-0">
-                  <div className="text-sm font-semibold text-gray-900">{display.label}</div>
-                  <div className="text-xs text-gray-400">{display.description}</div>
+                  <div className="text-[15px] font-medium" style={{ color: 'var(--apple-text-primary)' }}>
+                    {display.label}
+                  </div>
+                  <div className="text-[12px]" style={{ color: 'var(--apple-text-tertiary)' }}>
+                    {display.description}
+                  </div>
                 </div>
 
                 {/* Status badge */}
-                <div className={`flex items-center gap-1.5 text-xs font-semibold px-2.5 py-1 rounded-full ${
-                  isHealthy ? 'bg-emerald-50 text-emerald-700' : 'bg-red-50 text-red-600'
-                }`}>
-                  {isHealthy
-                    ? <CheckCircle2 className="w-3 h-3" />
-                    : <XCircle className="w-3 h-3" />
-                  }
-                  {isHealthy ? 'Connected' : 'Not configured'}
-                </div>
-
-                {/* Last checked */}
-                <div className="text-xs text-gray-300 tabular-nums flex-shrink-0 w-20 text-right">
-                  {new Date(conn.lastChecked).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                <div className="flex items-center gap-2 flex-shrink-0">
+                  <span
+                    className="flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-semibold"
+                    style={
+                      isOk
+                        ? { background: 'rgba(52,199,89,0.12)', color: 'var(--apple-green)' }
+                        : { background: 'rgba(255,59,48,0.10)', color: 'var(--apple-red)' }
+                    }
+                  >
+                    {isOk
+                      ? <CheckCircle2 size={10} strokeWidth={2.5} />
+                      : <XCircle size={10} strokeWidth={2.5} />}
+                    {isOk ? 'Connected' : 'Not configured'}
+                  </span>
+                  <span className="text-[11px] tabular-nums" style={{ color: 'var(--apple-text-tertiary)' }}>
+                    {new Date(conn.lastChecked).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                  </span>
                 </div>
               </div>
             )
@@ -99,54 +137,95 @@ export default async function SettingsPage() {
         </div>
       </section>
 
-      {/* SLA Policy */}
+      {/* ── SLA Policy — Inset Grouped ───────────────────────────── */}
       <section>
-        <div className="text-xs font-semibold uppercase tracking-wider text-gray-400 mb-3">SLA Policy</div>
-        <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-5">
-          <div className="flex items-start justify-between mb-4">
+        <div
+          className="text-[11px] font-semibold uppercase tracking-[0.07em] mb-2 px-1"
+          style={{ color: 'var(--apple-text-tertiary)' }}
+        >
+          SLA Policy
+        </div>
+
+        <div className="apple-inset-group">
+          <div className="apple-inset-row flex-col items-start gap-3" style={{ borderRadius: 10 }}>
             <div>
-              <div className="text-sm font-semibold text-gray-900">{slaPolicy?.name ?? 'Standard SLA'}</div>
-              <div className="text-xs text-gray-400 mt-0.5">
-                Leads must be contacted within the window below from the moment the form is submitted.
+              <div className="text-[15px] font-medium" style={{ color: 'var(--apple-text-primary)' }}>
+                {slaPolicy?.name ?? 'Standard SLA'}
+              </div>
+              <div className="text-[12px] mt-0.5" style={{ color: 'var(--apple-text-tertiary)' }}>
+                Leads must be contacted within this window from the form submission moment.
                 Missing this deadline triggers an escalation.
               </div>
             </div>
+            {slaPolicy ? (
+              <SlaForm ruleId={slaPolicy.id} initialMinutes={slaPolicy.sla_minutes || 15} token={token} />
+            ) : (
+              <div className="text-[13px] italic" style={{ color: 'var(--apple-text-tertiary)' }}>
+                No SLA policy found in database
+              </div>
+            )}
           </div>
-          {slaPolicy ? (
-            <SlaForm ruleId={slaPolicy.id} initialMinutes={slaPolicy.sla_minutes || 15} token={token} />
-          ) : (
-            <div className="text-sm text-gray-400 italic">No SLA policy found in database</div>
-          )}
         </div>
       </section>
 
-      {/* Territory Routing Rules */}
+      {/* ── Territory Rules — Inset Grouped ─────────────────────── */}
       <section>
-        <div className="text-xs font-semibold uppercase tracking-wider text-gray-400 mb-3">Territory Routing Rules</div>
+        <div
+          className="text-[11px] font-semibold uppercase tracking-[0.07em] mb-2 px-1"
+          style={{ color: 'var(--apple-text-tertiary)' }}
+        >
+          Territory Routing Rules
+        </div>
+
         {territoryRules.length === 0 ? (
-          <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-8 text-center">
-            <Globe className="w-8 h-8 text-gray-200 mx-auto mb-3" />
-            <div className="text-sm font-medium text-gray-500">No territory rules configured</div>
-            <div className="text-xs text-gray-400 mt-1">All qualified leads will use round-robin assignment</div>
+          <div className="apple-inset-group">
+            <div className="apple-inset-row flex-col items-center py-8 gap-2 text-center" style={{ borderRadius: 10 }}>
+              <Globe size={28} strokeWidth={1.25} style={{ color: 'var(--apple-text-tertiary)', opacity: 0.5 }} />
+              <div className="text-[13px] font-medium" style={{ color: 'var(--apple-text-secondary)' }}>
+                No territory rules configured
+              </div>
+              <div className="text-[12px]" style={{ color: 'var(--apple-text-tertiary)' }}>
+                All qualified leads use round-robin assignment
+              </div>
+            </div>
           </div>
         ) : (
-          <div className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden">
+          <div className="apple-inset-group">
             {territoryRules.map((rule, i) => (
               <div
                 key={rule.id}
-                className={`flex items-center gap-4 px-5 py-4 ${i < territoryRules.length - 1 ? 'border-b border-gray-50' : ''}`}
+                className="apple-inset-row"
+                style={{
+                  borderRadius:
+                    i === 0 && territoryRules.length === 1 ? '10px'
+                    : i === 0 ? '10px 10px 0 0'
+                    : i === territoryRules.length - 1 ? '0 0 10px 10px'
+                    : '0',
+                }}
               >
-                <div className="w-8 h-8 rounded-xl bg-violet-50 flex items-center justify-center flex-shrink-0">
-                  <Globe className="w-4 h-4 text-violet-500" />
+                <div
+                  className="w-8 h-8 rounded-[8px] flex items-center justify-center flex-shrink-0"
+                  style={{ background: 'rgba(88,86,214,0.10)' }}
+                >
+                  <Globe size={16} strokeWidth={1.75} style={{ color: '#5856D6' }} />
                 </div>
                 <div className="flex-1 min-w-0">
-                  <div className="text-sm font-semibold text-gray-900">{rule.name}</div>
-                  <div className="text-xs text-gray-400 mt-0.5">{rule.conditions_summary}</div>
+                  <div className="text-[15px] font-medium" style={{ color: 'var(--apple-text-primary)' }}>
+                    {rule.name}
+                  </div>
+                  <div className="text-[12px]" style={{ color: 'var(--apple-text-tertiary)' }}>
+                    {rule.conditions_summary}
+                  </div>
                 </div>
                 {rule.queue_assigned && (
-                  <div className="flex items-center gap-1.5 text-xs text-gray-500 flex-shrink-0">
-                    <ArrowRight className="w-3 h-3" />
-                    <span className="px-2 py-0.5 rounded-md bg-gray-100 font-mono text-gray-700">{rule.queue_assigned}</span>
+                  <div className="flex items-center gap-1.5 flex-shrink-0">
+                    <ArrowRight size={12} style={{ color: 'var(--apple-text-tertiary)' }} />
+                    <span
+                      className="px-2 py-0.5 rounded-md text-[11px] font-mono font-medium"
+                      style={{ background: 'rgba(0,0,0,0.05)', color: 'var(--apple-text-secondary)' }}
+                    >
+                      {rule.queue_assigned}
+                    </span>
                   </div>
                 )}
               </div>
@@ -154,6 +233,7 @@ export default async function SettingsPage() {
           </div>
         )}
       </section>
+
     </div>
   )
 }
