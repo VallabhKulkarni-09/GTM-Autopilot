@@ -2,6 +2,7 @@ import { apiFetch } from '@/lib/api'
 import { getServerToken } from '@/lib/auth'
 import { ConnectorHealth, PolicyRule } from '@/types/api'
 import { SlaForm } from './sla-form'
+import { ConnectorCredentialsForm } from './connector-credentials-form'
 import { CheckCircle2, XCircle, Globe, ArrowRight, AlertTriangle } from 'lucide-react'
 
 export const dynamic = 'force-dynamic'
@@ -79,57 +80,73 @@ export default async function SettingsPage() {
           {connectors.map((conn, i) => {
             const display = CONNECTOR_DISPLAY[conn.name] ?? { label: conn.name, description: '', emoji: '⚪' }
             const isOk    = conn.status === 'healthy'
+            const isFirst = i === 0
+            const isLast  = i === connectors.length - 1
+            const radius  = isFirst && isLast ? '10px'
+                          : isFirst ? '10px 10px 0 0'
+                          : isLast  ? '0 0 10px 10px'
+                          : '0'
             return (
               <div
                 key={conn.name}
-                className="apple-inset-row"
+                className="bg-white"
                 style={{
-                  borderRadius:
-                    i === 0 && connectors.length === 1 ? '10px'
-                    : i === 0 ? '10px 10px 0 0'
-                    : i === connectors.length - 1 ? '0 0 10px 10px'
-                    : '0',
+                  borderRadius: radius,
+                  borderBottom: isLast ? 'none' : '1px solid var(--apple-separator)',
                 }}
               >
-                {/* Icon area */}
-                <div
-                  className="w-9 h-9 rounded-[10px] flex items-center justify-center flex-shrink-0 text-[18px]"
-                  style={{
-                    background: isOk ? 'rgba(52,199,89,0.10)' : 'rgba(255,59,48,0.08)',
-                    boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.5)',
-                  }}
-                >
-                  {display.emoji}
-                </div>
-
-                {/* Info */}
-                <div className="flex-1 min-w-0">
-                  <div className="text-[15px] font-medium" style={{ color: 'var(--apple-text-primary)' }}>
-                    {display.label}
-                  </div>
-                  <div className="text-[12px]" style={{ color: 'var(--apple-text-tertiary)' }}>
-                    {display.description}
-                  </div>
-                </div>
-
-                {/* Status badge */}
-                <div className="flex items-center gap-2 flex-shrink-0">
-                  <span
-                    className="flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-semibold"
-                    style={
-                      isOk
-                        ? { background: 'rgba(52,199,89,0.12)', color: 'var(--apple-green)' }
-                        : { background: 'rgba(255,59,48,0.10)', color: 'var(--apple-red)' }
-                    }
+                {/* Status row */}
+                <div className="flex items-center gap-3 px-4 py-3.5">
+                  {/* Icon */}
+                  <div
+                    className="w-9 h-9 rounded-[10px] flex items-center justify-center flex-shrink-0 text-[18px]"
+                    style={{
+                      background: isOk ? 'rgba(52,199,89,0.10)' : 'rgba(255,59,48,0.08)',
+                      boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.5)',
+                    }}
                   >
-                    {isOk
-                      ? <CheckCircle2 size={10} strokeWidth={2.5} />
-                      : <XCircle size={10} strokeWidth={2.5} />}
-                    {isOk ? 'Connected' : 'Not configured'}
-                  </span>
-                  <span className="text-[11px] tabular-nums" style={{ color: 'var(--apple-text-tertiary)' }}>
-                    {new Date(conn.lastChecked).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                  </span>
+                    {display.emoji}
+                  </div>
+
+                  {/* Name + desc */}
+                  <div className="flex-1 min-w-0">
+                    <div className="text-[15px] font-medium" style={{ color: 'var(--apple-text-primary)' }}>
+                      {display.label}
+                    </div>
+                    <div className="text-[12px]" style={{ color: 'var(--apple-text-tertiary)' }}>
+                      {display.description}
+                    </div>
+                  </div>
+
+                  {/* Status badge + last checked */}
+                  <div className="flex items-center gap-2 flex-shrink-0">
+                    <span
+                      className="flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-semibold"
+                      style={
+                        isOk
+                          ? { background: 'rgba(52,199,89,0.12)', color: 'var(--apple-green)' }
+                          : { background: 'rgba(255,59,48,0.10)', color: 'var(--apple-red)' }
+                      }
+                    >
+                      {isOk
+                        ? <CheckCircle2 size={10} strokeWidth={2.5} />
+                        : <XCircle size={10} strokeWidth={2.5} />}
+                      {isOk ? 'Connected' : 'Not configured'}
+                    </span>
+                    <span className="text-[11px] tabular-nums" style={{ color: 'var(--apple-text-tertiary)' }}>
+                      {new Date(conn.lastChecked).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                    </span>
+                  </div>
+                </div>
+
+                {/* ── Credentials form — expands below the status row ── */}
+                <div
+                  className="px-4 pb-4"
+                  style={{ borderTop: '1px solid var(--apple-separator)' }}
+                >
+                  <div className="pt-3">
+                    <ConnectorCredentialsForm connectorName={conn.name} token={token} />
+                  </div>
                 </div>
               </div>
             )
