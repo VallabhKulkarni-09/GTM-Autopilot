@@ -145,10 +145,14 @@ export async function leadRoutes(app: FastifyInstance) {
         })
       }
 
-      // Attach current play instance state
+      // Attach current play instance state — includes outcome tracking columns (migration 018)
       const { data: play } = await db
         .from('play_instance')
-        .select('id, status, current_step, sla_breached, first_touch_at, first_touch_deadline, workflow_run_id')
+        .select(
+          'id, status, current_step, sla_breached, first_touch_at, first_touch_deadline, ' +
+          'workflow_run_id, outcome_status, outcome_detected_at, late_meeting_flag, ' +
+          'meetings_count_in_window, attribution_window_days'
+        )
         .eq('organization_id', organizationId)
         .eq('lead_id', id)
         .order('created_at', { ascending: false })

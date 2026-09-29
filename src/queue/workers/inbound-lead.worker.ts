@@ -68,6 +68,32 @@ async function loadSlaMins(organizationId: string): Promise<number> {
   return typeof slaMinutes === 'number' && slaMinutes > 0 ? slaMinutes : DEFAULT_SLA_MINUTES
 }
 
+/**
+ * Load attribution_window_days from the org's active outcome_detection policy rule.
+ * This value is captured ONCE at play creation time and stored on play_instance.
+ * The poller always reads it from play_instance.attribution_window_days — never
+ * re-reads from policy after the play is started. Policy changes after the fact
+ * have zero effect on in-flight plays (GEMINI.md non-negotiable).
+ *
+ * Defaults to 14 if no outcome_detection policy configured — play creation
+ * must not fail just because outcome tracking isn't yet set up for this org.
+ */
+async function loadAttributionWindowDays(organizationId: string): Promise<number> {
+  const db = getDb()
+  const { data } = await db
+    .from('policy_rules')
+    .select('conditions')
+    .eq('organization_id', organizationId)
+    .eq('rule_type', 'outcome_detection')
+    .eq('is_active', true)
+    .order('priority', { ascending: false })
+    .limit(1)
+    .single()
+
+  const days = (data?.conditions as any)?.attribution_window_days
+  return typeof days === 'number' && days > 0 ? days : 14
+}
+
 export const inboundLeadWorker = new Worker(
   'inbound-lead-processing',
   async (job) => {
@@ -84,8 +110,9 @@ export const inboundLeadWorker = new Worker(
         ? new Date(payload.occurredAt).toISOString()
         : new Date().toISOString()
 
-      // ── Load SLA minutes for this org ────────────────────────────────────────
+      // ── Load SLA minutes + attribution window for this org ────────────────────
       const slaMinutes = await loadSlaMins(orgId)
+      const attributionWindowDays = await loadAttributionWindowDays(orgId)
       const firstTouchDeadline = new Date(
         new Date(formSubmittedAt).getTime() + slaMinutes * 60_000
       ).toISOString()
@@ -153,6 +180,9 @@ export const inboundLeadWorker = new Worker(
           workflow_run_id:    workflowRunId,
           // SLA deadline: form_submitted_at + sla_minutes (NEVER created_at)
           first_touch_deadline: firstTouchDeadline,
+          // Attribution window captured at play start — IMMUTABLE after creation.
+          // Poller always reads this value from play_instance, never from policy.
+          attribution_window_days: attributionWindowDays,
         })
         .select('id')
         .single()

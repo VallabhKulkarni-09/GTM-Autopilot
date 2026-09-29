@@ -49,6 +49,23 @@ export type SalesforceUser = {
   Profile: { Name: string } | null
 }
 
+/**
+ * Salesforce Event object — used for meeting detection (outcome tracking).
+ * Fields selected: Id, WhoId, Type, Subject, StartDateTime, EndDateTime,
+ * ActivityDate, CreatedDate.
+ * WhoId links to the Lead or Contact record (same as Task.WhoId).
+ */
+export type SalesforceEvent = {
+  Id: string
+  WhoId: string | null
+  Type: string
+  Subject: string | null
+  StartDateTime: string
+  EndDateTime: string | null
+  ActivityDate: string | null
+  CreatedDate: string
+}
+
 // ─── Input Types ──────────────────────────────────────────────────────────────
 
 export type CreateLeadInput = {

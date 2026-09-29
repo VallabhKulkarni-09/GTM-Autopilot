@@ -1,9 +1,9 @@
 /**
  * setup.ts — BullMQ queue definitions and Redis connection.
- * Exports queue instances, addJob helper, and the SLA timer registration.
+ * Exports queue instances, addJob helper, and job registration helpers.
  */
 
-import { Queue, QueueEvents, Worker } from 'bullmq'
+import { Queue, Worker } from 'bullmq'
 
 // ─── Redis connection ─────────────────────────────────────────────────────────
 
@@ -13,23 +13,33 @@ export const redisConnection = {
 
 // ─── Queue definitions ────────────────────────────────────────────────────────
 
-export const inboundLeadQueue = new Queue('inbound-lead-processing', { connection: redisConnection })
-export const advancePlayQueue  = new Queue('advance-play-step',       { connection: redisConnection })
-export const escalateQueue     = new Queue('escalate-play',           { connection: redisConnection })
-export const slaTimerQueue     = new Queue('sla-timer',               { connection: redisConnection })
+export const inboundLeadQueue        = new Queue('inbound-lead-processing',  { connection: redisConnection })
+export const advancePlayQueue        = new Queue('advance-play-step',        { connection: redisConnection })
+export const escalateQueue           = new Queue('escalate-play',            { connection: redisConnection })
+export const slaTimerQueue           = new Queue('sla-timer',                { connection: redisConnection })
+export const outcomePollerQueue      = new Queue('outcome-detection-poller', { connection: redisConnection })
+export const outcomeWindowCloserQueue = new Queue('outcome-window-closer',    { connection: redisConnection })
 
 // ─── addJob helper ────────────────────────────────────────────────────────────
 
 export async function addJob(
-  queueName: 'inbound-lead-processing' | 'advance-play-step' | 'escalate-play' | 'sla-timer',
+  queueName:
+    | 'inbound-lead-processing'
+    | 'advance-play-step'
+    | 'escalate-play'
+    | 'sla-timer'
+    | 'outcome-detection-poller'
+    | 'outcome-window-closer',
   data: Record<string, unknown>,
   options?: { priority?: number }
 ): Promise<void> {
   const queues: Record<string, Queue> = {
-    'inbound-lead-processing': inboundLeadQueue,
-    'advance-play-step': advancePlayQueue,
-    'escalate-play': escalateQueue,
-    'sla-timer': slaTimerQueue,
+    'inbound-lead-processing':  inboundLeadQueue,
+    'advance-play-step':        advancePlayQueue,
+    'escalate-play':            escalateQueue,
+    'sla-timer':                slaTimerQueue,
+    'outcome-detection-poller': outcomePollerQueue,
+    'outcome-window-closer':    outcomeWindowCloserQueue,
   }
 
   const queue = queues[queueName]
@@ -57,6 +67,44 @@ export async function registerSlaTimer(): Promise<void> {
     { every: 2 * 60 * 1000 },
     {
       name: 'sla-check',
+      data: { trigger: 'scheduled' },
+      opts: {
+        removeOnComplete: 10,
+        removeOnFail: 50,
+      },
+    }
+  )
+}
+
+// ─── Outcome detection poller repeatable job ──────────────────────────────────
+// Interval via OUTCOME_POLL_INTERVAL_MS env var, default 10 minutes.
+
+export async function registerOutcomePoller(): Promise<void> {
+  const intervalMs = parseInt(process.env.OUTCOME_POLL_INTERVAL_MS ?? '', 10) || 10 * 60 * 1000
+  await outcomePollerQueue.upsertJobScheduler(
+    'outcome-poll',
+    { every: intervalMs },
+    {
+      name: 'outcome-poll',
+      data: { trigger: 'scheduled' },
+      opts: {
+        removeOnComplete: 10,
+        removeOnFail: 50,
+      },
+    }
+  )
+}
+
+// ─── Outcome window closer repeatable job ─────────────────────────────────────
+// Interval via OUTCOME_WINDOW_CLOSE_INTERVAL_MS env var, default 1 hour.
+
+export async function registerOutcomeWindowCloser(): Promise<void> {
+  const intervalMs = parseInt(process.env.OUTCOME_WINDOW_CLOSE_INTERVAL_MS ?? '', 10) || 60 * 60 * 1000
+  await outcomeWindowCloserQueue.upsertJobScheduler(
+    'outcome-window-close',
+    { every: intervalMs },
+    {
+      name: 'outcome-window-close',
       data: { trigger: 'scheduled' },
       opts: {
         removeOnComplete: 10,

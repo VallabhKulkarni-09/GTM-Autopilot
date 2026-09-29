@@ -31,7 +31,7 @@ export async function metricsRoutes(app: FastifyInstance) {
     // ── Current period plays ─────────────────────────────────────────────────
     const { data: currentPlays } = await db
       .from('play_instance')
-      .select('first_touch_at, first_touch_deadline, sla_breached, status, lead_id')
+      .select('first_touch_at, first_touch_deadline, sla_breached, status, lead_id, outcome_status')
       .eq('organization_id', organizationId)
       .gte('created_at', currentStart)
 
@@ -79,6 +79,19 @@ export async function metricsRoutes(app: FastifyInstance) {
     const meetingsBooked   = current.filter(p => p.status === 'completed').length
     const totalQualified   = current.length
 
+    // ── meeting_rate: outcome-based, distinct from legacy meetingsBooked ──────
+    // Computed only from plays with closed attribution windows:
+    //   meeting_rate = meeting_booked_count / (meeting_booked_count + no_meeting_count)
+    // no_outcome_yet plays are excluded from the denominator (window still open).
+    // This field is intentionally separate from meetingsBooked above — their
+    // definitions differ and must be reconciled separately.
+    const meetingBookedCount = current.filter(p => (p as any).outcome_status === 'meeting_booked').length
+    const noMeetingCount     = current.filter(p => (p as any).outcome_status === 'no_meeting').length
+    const outcomesDenominator = meetingBookedCount + noMeetingCount
+    const meeting_rate = outcomesDenominator > 0
+      ? Math.round((meetingBookedCount / outcomesDenominator) * 100)
+      : null  // null = no plays have closed windows yet
+
     // ── Prior period calculations ────────────────────────────────────────────
     const prior = priorPlays ?? []
     const priorMeetings   = prior.filter(p => p.status === 'completed').length
@@ -95,6 +108,7 @@ export async function metricsRoutes(app: FastifyInstance) {
         avgFirstTouchMin,
         meetingsBooked,
         totalQualified,
+        meeting_rate,           // distinct from meetingsBooked — outcome-based, null until windows close
       },
       priorPeriod: {
         touchedUnder15MinPct: priorTouchedUnder15MinPct,

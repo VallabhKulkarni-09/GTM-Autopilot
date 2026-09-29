@@ -1,5 +1,8 @@
 export type LeadStage = 'new' | 'enriching' | 'routing' | 'in_sequence' | 'meeting_booked' | 'nurture' | 'lost'
 
+/** Outcome status of a play's attribution window (migration 018). */
+export type OutcomeStatus = 'no_outcome_yet' | 'meeting_booked' | 'no_meeting'
+
 export interface OverviewMetrics {
   currentPeriod: {
     touchedUnder15MinPct: number;
@@ -8,6 +11,13 @@ export interface OverviewMetrics {
     activePlays: number;
     meetingsBooked: number;
     totalQualified: number;
+    /**
+     * Outcome-based meeting rate (distinct from meetingsBooked above).
+     * = meeting_booked plays / (meeting_booked + no_meeting) plays.
+     * Excludes no_outcome_yet plays from denominator.
+     * null = no plays have closed attribution windows yet.
+     */
+    meeting_rate: number | null;
   };
   priorPeriod: {
     touchedUnder15MinPct: number;
@@ -52,6 +62,26 @@ export interface PaginatedLeads {
   limit: number;
 }
 
+/**
+ * Current play state returned in GET /api/leads/:id response.
+ * Includes outcome tracking fields added in migration 018.
+ */
+export interface PlayState {
+  id: string;
+  status: string;
+  current_step: number;
+  sla_breached: boolean;
+  first_touch_at: string | null;
+  first_touch_deadline: string | null;
+  workflow_run_id: string | null;
+  // Outcome tracking (migration 018)
+  outcome_status: OutcomeStatus;
+  outcome_detected_at: string | null;
+  late_meeting_flag: boolean;
+  meetings_count_in_window: number;
+  attribution_window_days: number;
+}
+
 export type EventType = 
   | 'webhook_received'
   | 'enrichment_requested'
@@ -73,7 +103,11 @@ export type EventType =
   | 'human_rejected'
   | 'play_completed'
   | 'play_marked_nurture'
-  | 'play_marked_duplicate';
+  | 'play_marked_duplicate'
+  // Outcome tracking events (migration 018)
+  | 'outcome_detected'
+  | 'late_meeting_detected'
+  | 'outcome_window_closed';
 
 export interface TimelineEvent {
   id: string;

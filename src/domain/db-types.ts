@@ -42,6 +42,19 @@ export type PolicyRuleType =
   | 'sla'
   | 'dedup'
   | 'routing'
+  | 'outcome_detection'
+
+// ── Outcome tracking ──────────────────────────────────────────────────────────
+
+export type OutcomeStatus = 'no_outcome_yet' | 'meeting_booked' | 'no_meeting'
+
+export type SignalType =
+  | 'sf_event_meeting'
+  | 'lead_status'
+  | 'meeting_checkbox'
+  | 'opportunity_stage'
+
+export type SignalConfidence = 'primary' | 'supportive'
 
 export type RiskLevel = 'low' | 'medium' | 'high' | 'critical'
 
@@ -96,8 +109,12 @@ export type EventType =
   | 'account_match_no_match'
   | 'account_match_found'
   | 'account_match_error'
+  // Outcome tracking
+  | 'outcome_detected'         // first primary signal — meeting_booked
+  | 'late_meeting_detected'    // primary signal after no_meeting was set
+  | 'outcome_window_closed'    // attribution window expired with no primary signal
 
-export type ActorType = 'agent' | 'human' | 'system' | 'sla_timer' | 'webhook'
+export type ActorType = 'agent' | 'human' | 'system' | 'sla_timer' | 'webhook' | 'outcome_poller'
 
 export type EventStatus = 'success' | 'failed' | 'skipped'
 
@@ -241,8 +258,32 @@ export type PlayInstance = {
   sequence_id: string | null
   enrolled_at: string | null
   failure_reason: string | null
+  // Outcome tracking columns (migration 018)
+  outcome_status: OutcomeStatus              // default: 'no_outcome_yet'
+  outcome_detected_at: string | null         // set on first primary signal
+  attribution_window_days: number            // captured from policy at play start — IMMUTABLE after creation
+  late_meeting_flag: boolean                 // primary signal after no_meeting cutoff
+  meetings_count_in_window: number           // total primary signals within window
   created_at: string
   updated_at: string
+}
+
+// ── OutcomeSignal ─────────────────────────────────────────────────────────────
+// Append-only. Never UPDATE. Never DELETE.
+// sf_raw_payload stores full raw SF payload for replay (same spirit as decision_snapshot).
+// UNIQUE on (organization_id, play_instance_id, external_event_id) for idempotency.
+
+export type OutcomeSignal = {
+  id: string
+  organization_id: string
+  play_instance_id: string
+  lead_id: string
+  signal_type: SignalType
+  confidence: SignalConfidence
+  external_event_id: string
+  sf_raw_payload: Record<string, unknown>
+  detected_at: string
+  // NO updated_at — append-only
 }
 
 /**
@@ -356,6 +397,8 @@ export type InsertEventLog = Omit<EventLog, 'id' | 'occurred_at' | 'created_at'>
 export type InsertActionExecutionState = Omit<ActionExecutionState, 'id' | 'created_at' | 'updated_at'>
 export type InsertConnectorConfig = Omit<ConnectorConfig, 'id' | 'created_at' | 'updated_at'>
 export type InsertRoutingState = Omit<RoutingState, 'id' | 'created_at' | 'updated_at'>
+// OutcomeSignal is append-only — omit id and detected_at (DB defaults)
+export type InsertOutcomeSignal = Omit<OutcomeSignal, 'id' | 'detected_at'>
 
 // ─── Update Types (all fields optional except ID) ────────────────────────────
 
