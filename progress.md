@@ -17,11 +17,11 @@
 | Qualification | ✅ Live | Rule-based, goes to nurture (no Clearbit key) |
 | Routing | ✅ Live | Round-robin from DB, nurture fallback |
 | Salesforce | ✅ Live | Owner assign + task creation working |
-| Outreach | ⚠️ No key | Sequence enrollment skipped gracefully |
+| Outreach | 🔧 Awaiting credentials | Connector rewritten (OAuth2 + mailbox fix). First-touch wired. Needs OUTREACH_CLIENT_ID/SECRET/ACCESS_TOKEN/REFRESH_TOKEN/MAILBOX_ID/SEQUENCE_ID in Railway env vars, then live-fire test. |
 | Clearbit | ⚠️ No key | Enrichment returns minimal data → ICP score 0 |
 | SLA Timer | ✅ Railway confirmed | Breach detected + `sla_breached` event written on Railway (`actor_type=sla_timer`). Slack escalation NOT wired yet. |
 | Human-in-loop | ⚠️ Partial | `interrupt()` in graph, no approve/reject UI |
-| Outcome Tracking | ✅ Live-fire proven | SF Event polled → `outcome_signal` written → play `meeting_booked` → `event_log` appended. 9 bugs caught live across 2 sessions. |
+| Outcome Tracking | ✅ Fully proven on Railway | All 3 jobs confirmed autonomous: outcome-poller (`08:13:28Z`), sla-timer (`08:04:26Z`), window-closer (`08:40:35Z`). Logic ✅ + scheduler ✅ + together on Railway ✅. |
 
 ---
 
@@ -275,6 +275,11 @@ e84f2af  fix(dashboard): add force-dynamic to all auth pages + Vercel env vars
 | **SLA timer — Railway confirmed ✅** | ✅ Proven `08:04:26Z` | Play `78ee3b29` flipped `sla_breached=true` on Railway within seconds of correct deployment. `event_log` row `7b57d8ac` written (`actor_type=sla_timer`). Detection pipeline end-to-end proven. Escalation enqueue (`addJob`) runs on Railway Redis — not verifiable locally (no local Redis). |
 | **Railway startCommand wrong — ALL scheduled jobs were dead** | ✅ Fixed via API | Worker was configured with `startCommand: node dist/queue/workers/inbound-lead.worker.js` — an override that bypassed the Dockerfile CMD entirely. The SLA timer, outcome poller, and outcome window closer were never instantiated on Railway — not once, on any deployment. Fixed to `node dist/queue/start-workers.js` via Railway API. |
 | **Redis audit — single source, all clean** | ✅ Confirmed | All 6 Queues and 3 Workers import `redisConnection` from `setup.ts`. No file creates its own Redis connection. The `38f224e` fix (`new Redis(url, { maxRetriesPerRequest: null })`) covers 100% of BullMQ usage by definition. |
+| **Window-closer — Railway confirmed ✅** | ✅ Proven `08:40:35Z` | Set `attribution_window_days=0` on `da963e42` (test.webhook@acme.com). Window-closer fired autonomously on Railway 60s schedule. Play flipped to `no_meeting`. `event_log` `351581cf` written (`outcome_window_closed`, `outcome_poller`). No-op check: `796f1c5c` (meeting_booked) untouched (0 window_closed events). Outcome Tracking FULLY proven. |
+| **Outreach bug 1 — static API key assumption** | ✅ Fixed `29de401` | `OutreachConfig = { apiKey }` was wrong — Outreach has no static API keys. Requires OAuth2. Replaced with `{ clientId, clientSecret, accessToken, refreshToken, mailboxId }`. |
+| **Outreach bug 2 — missing mailbox in sequenceStates** | ✅ Fixed `29de401` | `enrollInSequence` was missing the required `mailbox` relationship. Outreach returns 422 without it. Added `mailboxId` from config. Returns `OutreachSequenceState` (id captured as evidence). |
+| **Outreach bug 3 — first-touch passed empty parameters** | ✅ Fixed `29de401` | `first-touch.ts` was passing `parameters: {}` and `connectors: {} as any` — executor always skipped enrollment. Rewritten to create OutreachConnector inline, find-or-create prospect by email, pass `outreach_prospect_id` + `sequence_id` to `executeAction`. Mirrors `route.ts` SF pattern. |
+| **Outreach — awaiting live-fire test** | 🔧 Next step | Code complete + TSC clean. Needs: OUTREACH_CLIENT_ID, OUTREACH_CLIENT_SECRET set in Railway → OAuth flow via `/api/outreach/oauth/start` → OUTREACH_ACCESS_TOKEN, OUTREACH_REFRESH_TOKEN, OUTREACH_MAILBOX_ID, OUTREACH_SEQUENCE_ID set → HubSpot form submit → confirm prospect enrolled in Outreach UI. |
 
 ---
 
