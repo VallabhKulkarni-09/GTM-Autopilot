@@ -3,13 +3,17 @@
  * Exports queue instances, addJob helper, and job registration helpers.
  */
 
-import { Queue, Worker } from 'bullmq'
+import { Redis } from 'ioredis'
+import { Queue } from 'bullmq'
 
 // ─── Redis connection ─────────────────────────────────────────────────────────
-
-export const redisConnection = {
-  url: process.env.REDIS_URL ?? 'redis://localhost:6379',
-}
+// IMPORTANT: { url: '...' } is NOT valid ioredis options — the url key is
+// silently ignored and ioredis falls back to localhost:6379.
+// new Redis(url) is the correct pattern for URL-based connections.
+export const redisConnection = new Redis(
+  process.env.REDIS_URL ?? 'redis://localhost:6379',
+  { maxRetriesPerRequest: null }   // required by BullMQ
+)
 
 // ─── Queue definitions ────────────────────────────────────────────────────────
 
