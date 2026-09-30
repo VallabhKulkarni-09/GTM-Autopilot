@@ -7,10 +7,19 @@
 
 -- FORWARD MIGRATION
 
--- ── Extend policy_rule_type enum ──────────────────────────────────────────────
--- Must run before INSERT into policy_rules with rule_type = 'outcome_detection'.
--- IF NOT EXISTS is safe on re-run (idempotent).
+-- ── Extend enum types ─────────────────────────────────────────────────────────
+-- All IF NOT EXISTS — safe on re-run. Must precede any INSERT/UPDATE using these values.
+
+-- policy_rule_type: needed to seed outcome_detection policy rows
 ALTER TYPE policy_rule_type ADD VALUE IF NOT EXISTS 'outcome_detection';
+
+-- event_type: needed for event_log writes from outcome poller + window closer
+ALTER TYPE event_type ADD VALUE IF NOT EXISTS 'outcome_detected';
+ALTER TYPE event_type ADD VALUE IF NOT EXISTS 'late_meeting_detected';
+ALTER TYPE event_type ADD VALUE IF NOT EXISTS 'outcome_window_closed';
+
+-- actor_type: used as actor in outcome poller event_log rows
+ALTER TYPE actor_type ADD VALUE IF NOT EXISTS 'outcome_poller';
 
 -- ── outcome_signal table ──────────────────────────────────────────────────────
 -- Append-only. Never UPDATE. Never DELETE. Mirrors event_log spirit.
