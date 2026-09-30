@@ -15,11 +15,12 @@ import Fastify from 'fastify'
 import helmet from '@fastify/helmet'
 import rateLimit from '@fastify/rate-limit'
 import { tenantContextMiddleware } from './middleware/tenant-context.js'
-import { webhookRoutes }   from './routes/webhooks.js'
-import { leadRoutes }      from './routes/api/leads.js'
-import { metricsRoutes }   from './routes/api/metrics.js'
-import { connectorRoutes } from './routes/api/connectors.js'
-import { policyRoutes }    from './routes/api/policies.js'
+import { webhookRoutes }       from './routes/webhooks.js'
+import { leadRoutes }          from './routes/api/leads.js'
+import { metricsRoutes }       from './routes/api/metrics.js'
+import { connectorRoutes }     from './routes/api/connectors.js'
+import { policyRoutes }        from './routes/api/policies.js'
+import { outreachOAuthRoutes } from './routes/outreach-oauth.js'
 
 export function buildApp() {
   const app = Fastify({
@@ -49,13 +50,17 @@ export function buildApp() {
 
   // ─── Routes ────────────────────────────────────────────────────────────────
   // Webhooks: no rate-limit, no tenant middleware (HMAC only)
-  app.register(webhookRoutes,   { prefix: '/webhooks' })
+  app.register(webhookRoutes,       { prefix: '/webhooks' })
 
   // API routes: tenant middleware applied, rate-limited
-  app.register(leadRoutes,      { prefix: '/api/leads' })
-  app.register(metricsRoutes,   { prefix: '/api/metrics' })
-  app.register(connectorRoutes, { prefix: '/api/connectors' })
-  app.register(policyRoutes,    { prefix: '/api/policies' })
+  app.register(leadRoutes,          { prefix: '/api/leads' })
+  app.register(metricsRoutes,       { prefix: '/api/metrics' })
+  app.register(connectorRoutes,     { prefix: '/api/connectors' })
+  app.register(policyRoutes,        { prefix: '/api/policies' })
+
+  // Outreach OAuth setup utility (no tenant middleware — one-time credential bootstrap)
+  app.register(outreachOAuthRoutes, { prefix: '/api/outreach/oauth' })
+
 
   // ─── Health check — required by Railway ───────────────────────────────────
   app.get('/health', { logLevel: 'silent' }, async (_req, reply) => {

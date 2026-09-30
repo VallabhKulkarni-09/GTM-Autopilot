@@ -29,7 +29,9 @@ export type ConnectorRegistry = {
   }
   hubspot: unknown
   outreach: {
-    enrollInSequence(prospectId: string, sequenceId: string, idempotencyKey: string): Promise<void>
+    getProspectByEmail(email: string): Promise<{ id: string } | null>
+    createProspect(input: { email: string; firstName?: string; lastName?: string; title?: string }, idempotencyKey: string): Promise<{ id: string }>
+    enrollInSequence(prospectId: string, sequenceId: string, idempotencyKey: string): Promise<{ id: string }>
   }
   clearbit: unknown
 }
@@ -302,18 +304,38 @@ export async function executeAction(
           outreach_prospect_id: string; sequence_id: string
         }
 
-        const outreachAvailable = !!connectors?.outreach
+        const outreachAvailable = !!connectors?.outreach && !!outreach_prospect_id && !!sequence_id
+        let sequenceStateId: string | undefined
+
         if (outreachAvailable) {
-          await connectors.outreach.enrollInSequence(outreach_prospect_id, sequence_id, key)
+          const seqState = await connectors.outreach.enrollInSequence(outreach_prospect_id, sequence_id, key)
+          sequenceStateId = seqState.id
+
+          // Store Outreach sequenceState ID in external_identity (best-effort, non-fatal)
+          try {
+            await getDb().from('external_identity').insert({
+              organization_id: action.target.organizationId ?? organizationId,
+              entity_type:     'lead',
+              entity_id:       action.target.leadId,
+              provider:        'outreach',
+              external_id:     outreach_prospect_id,
+              metadata: {
+                sequence_id,
+                sequence_state_id: sequenceStateId,
+                enrolled_by: 'action-executor:start_sequence',
+              },
+            })
+          } catch { /* duplicate key — idempotent, ignore */ }
         } else {
-          console.warn(`[action-executor] start_sequence: Outreach connector unavailable for org ${organizationId} — sequence enrollment skipped`)
+          console.warn(
+            `[action-executor] start_sequence: Outreach connector unavailable ` +
+            `(outreachAvailable=${outreachAvailable}, prospectId=${outreach_prospect_id ?? 'missing'}, ` +
+            `sequenceId=${sequence_id ?? 'missing'}) — enrollment skipped for org ${organizationId}`
+          )
         }
 
         await updatePlayInstance(playInstanceId, organizationId, {
           first_touch_at: new Date().toISOString(),
-          // play_status enum: running|completed|failed|paused|nurture|duplicate
-          // 'in_sequence' is a LeadStage (lead table), not a PlayStatus (play_instance table).
-          // The play is complete once first-touch actions are done.
           status: 'completed',
           ...(outreachAvailable ? { sequence_id } : {}),
           ...(outreachAvailable ? { enrolled_at: new Date().toISOString() } : {}),
@@ -321,11 +343,17 @@ export async function executeAction(
         await updateLead(action.target.leadId, organizationId, { stage: 'in_sequence' })
         result = {
           success: true,
-          ...(outreachAvailable ? { externalSystem: 'outreach' as ConnectorName, externalId: outreach_prospect_id } : {}),
-          output: { sequence_id, outreach_synced: outreachAvailable },
+          ...(sequenceStateId ? { externalSystem: 'outreach' as ConnectorName, externalId: sequenceStateId } : {}),
+          output: {
+            sequence_id,
+            outreach_synced: outreachAvailable,
+            ...(outreach_prospect_id ? { outreach_prospect_id } : {}),
+            ...(sequenceStateId ? { sequence_state_id: sequenceStateId } : {}),
+          },
         }
         break
       }
+
 
       // ── mark_nurture ───────────────────────────────────────────────────────
       case 'mark_nurture': {
