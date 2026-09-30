@@ -58,7 +58,8 @@ export type SalesforceUser = {
 export type SalesforceEvent = {
   Id: string
   WhoId: string | null
-  Type: string
+  // NOTE: Event.Type does not exist in this SF org (INVALID_FIELD confirmed via live describe).
+  // Removed from type and SOQL. Subject is the primary categorisation field.
   Subject: string | null
   StartDateTime: string
   EndDateTime: string | null

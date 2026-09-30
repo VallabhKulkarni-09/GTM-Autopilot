@@ -89,11 +89,16 @@ async function soqlFetch<T>(
 /**
  * Queries Salesforce Event objects linked to a Lead/Contact (via WhoId).
  *
- * @param connector   A connected SalesforceConnector instance.
- * @param whoId       The Salesforce Lead or Contact Id (WhoId on Event).
- * @param meetingTypes Event.Type values to match — from org policy, NEVER hardcoded.
- * @param since       Start of the search window.
- * @param until       End of the search window.
+ * NOTE: Event.Type does not exist in this org — confirmed via live SF describe
+ * query (INVALID_FIELD). This org uses Subject to categorise events.
+ * Subject picklist values: ['Call', 'Email', 'Meeting', 'Send Letter/Quote', 'Other']
+ * Policy config's primaryMeetingTypes must contain Subject values (e.g. 'Meeting').
+ *
+ * @param connector        A connected SalesforceConnector instance.
+ * @param whoId            The Salesforce Lead or Contact Id (WhoId on Event).
+ * @param meetingSubjects  Event.Subject values to match — from org policy, NEVER hardcoded.
+ * @param since            Start of the search window.
+ * @param until            End of the search window.
  *
  * @throws {ConnectorError} with code SF_EVENT_OBJECT_NOT_ACCESSIBLE if the
  *   Event object is inaccessible (missing OAuth scope or field-level security).
@@ -102,20 +107,22 @@ async function soqlFetch<T>(
 export async function queryMeetingEvents(
   connector: SalesforceConnector,
   whoId: string,
-  meetingTypes: string[],
+  meetingSubjects: string[],
   since: Date,
   until: Date
 ): Promise<SalesforceEvent[]> {
-  if (meetingTypes.length === 0) return []  // no types configured — no query needed
+  if (meetingSubjects.length === 0) return []
 
   const sinceIso = since.toISOString()
   const untilIso = until.toISOString()
 
+  // Event.Type does not exist in this SF org (INVALID_FIELD confirmed via live describe).
+  // Filter on Subject — the only reliable activity categorisation field available.
   const soql = [
-    'SELECT Id, WhoId, Type, Subject, StartDateTime, EndDateTime, ActivityDate, CreatedDate',
+    'SELECT Id, WhoId, Subject, StartDateTime, EndDateTime, ActivityDate, CreatedDate',
     'FROM Event',
     `WHERE WhoId = '${escapeSoqlString(whoId)}'`,
-    `AND Type IN ${buildInClause(meetingTypes)}`,
+    `AND Subject IN ${buildInClause(meetingSubjects)}`,
     `AND StartDateTime >= ${sinceIso}`,
     `AND StartDateTime <= ${untilIso}`,
     'ORDER BY StartDateTime ASC',
