@@ -7,6 +7,11 @@
 
 -- FORWARD MIGRATION
 
+-- ── Extend policy_rule_type enum ──────────────────────────────────────────────
+-- Must run before INSERT into policy_rules with rule_type = 'outcome_detection'.
+-- IF NOT EXISTS is safe on re-run (idempotent).
+ALTER TYPE policy_rule_type ADD VALUE IF NOT EXISTS 'outcome_detection';
+
 -- ── outcome_signal table ──────────────────────────────────────────────────────
 -- Append-only. Never UPDATE. Never DELETE. Mirrors event_log spirit.
 -- sf_raw_payload stores the full raw Salesforce Event object for replay.
