@@ -1,6 +1,6 @@
 # GTM Autopilot — Progress Log
 
-> **Last updated:** 2026-09-29
+> **Last updated:** 2026-09-30
 > **Conversation ID:** `737b230b-5cbd-42d9-8430-08fc44197d62`
 > **Prior session:** `108376a4-3a76-49d3-b43b-018d42e7d6f5`
 
@@ -11,7 +11,7 @@
 | Layer | Status | Notes |
 |---|---|---|
 | API (Railway) | ✅ Live | `https://gtm-api-production-adc0.up.railway.app` |
-| Worker (Railway) | ✅ Live | Separate container, BullMQ + Redis |
+| Worker (Railway) | ✅ Live | `start-workers.js` — all 3 workers + 3 repeatable jobs now active |
 | Dashboard (Vercel) | ✅ Live | `https://gtm-autopilot-dashboard.vercel.app` |
 | Webhook → Queue | ✅ Proven E2E | HubSpot → HMAC verify → BullMQ → worker |
 | Qualification | ✅ Live | Rule-based, goes to nurture (no Clearbit key) |
@@ -19,9 +19,9 @@
 | Salesforce | ✅ Live | Owner assign + task creation working |
 | Outreach | ⚠️ No key | Sequence enrollment skipped gracefully |
 | Clearbit | ⚠️ No key | Enrichment returns minimal data → ICP score 0 |
-| SLA Timer | ✅ Detects | Slack escalation NOT wired yet |
+| SLA Timer | ✅ Railway confirmed | Breach detected + `sla_breached` event written on Railway (`actor_type=sla_timer`). Slack escalation NOT wired yet. |
 | Human-in-loop | ⚠️ Partial | `interrupt()` in graph, no approve/reject UI |
-| Outcome Tracking | ✅ Live-fire proven | Detection confirmed: SF Event polled, `outcome_signal` written, play flipped `meeting_booked`, `event_log` appended, `sf_raw_payload` stored. 6 bugs caught live. Railway needs Redis fix redeploy. |
+| Outcome Tracking | ✅ Live-fire proven | SF Event polled → `outcome_signal` written → play `meeting_booked` → `event_log` appended. 9 bugs caught live across 2 sessions. |
 
 ---
 
@@ -272,7 +272,9 @@ e84f2af  fix(dashboard): add force-dynamic to all auth pages + Vercel env vars
 | **Outcome Tracking — dedup blocks re-engaged leads** | ⚠️ Known limitation | A lead who re-submits a form is deduped before `play_instance` is created — no new outcome tracking window. Understates conversion if re-engagement is common. **Product decision — do not resolve without a real re-engagement case.** Review before second design partner. |
 | **Outcome Tracking — poller live-fire ✅ PROVEN** | ✅ Confirmed | Poller ran locally against real SF + Supabase. `outcome_signal` `190bb96e` inserted (`signal_type=sf_event_meeting`, `confidence=primary`, `external_event_id=00Ug7000001yKuXEAU`). Play `796f1c5c` flipped `outcome_status → meeting_booked`, `meetings_count_in_window=1`. `event_log` row `e0aab037` written (`actor_type=outcome_poller`). Full `sf_raw_payload` stored for replay. |
 | **Redis connection bug — all BullMQ jobs were no-ops** | ✅ Fixed `38f224e` | `{ url: '...' }` is silently ignored by ioredis — it connects to `localhost:6379` instead. Fixed to `new Redis(url, { maxRetriesPerRequest: null })`. This means the SLA timer was also never actually detecting breaches on Railway — needs re-verification after fix deploys. |
-| **SLA timer — re-verify needed** | ⚠️ Re-verify | Was listed as "✅ Detects" but the Redis bug means it was a no-op on Railway. Now that `38f224e` is deployed, the SLA timer should work. Needs a live breach test to confirm. |
+| **SLA timer — Railway confirmed ✅** | ✅ Proven `08:04:26Z` | Play `78ee3b29` flipped `sla_breached=true` on Railway within seconds of correct deployment. `event_log` row `7b57d8ac` written (`actor_type=sla_timer`). Detection pipeline end-to-end proven. Escalation enqueue (`addJob`) runs on Railway Redis — not verifiable locally (no local Redis). |
+| **Railway startCommand wrong — ALL scheduled jobs were dead** | ✅ Fixed via API | Worker was configured with `startCommand: node dist/queue/workers/inbound-lead.worker.js` — an override that bypassed the Dockerfile CMD entirely. The SLA timer, outcome poller, and outcome window closer were never instantiated on Railway — not once, on any deployment. Fixed to `node dist/queue/start-workers.js` via Railway API. |
+| **Redis audit — single source, all clean** | ✅ Confirmed | All 6 Queues and 3 Workers import `redisConnection` from `setup.ts`. No file creates its own Redis connection. The `38f224e` fix (`new Redis(url, { maxRetriesPerRequest: null })`) covers 100% of BullMQ usage by definition. |
 
 ---
 
