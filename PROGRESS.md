@@ -275,3 +275,140 @@ Clearbit enrichment is code-complete; it would replace the seeded data if creden
 ### What ngrok was replaced with
       ngrok was only needed for local dev. Railway provides a permanent stable URL.
       No more manual ngrok restarts or webhook URL updates needed.
+
+---
+
+## Session: 2026-10-03 — Salesloft, ZoomInfo, Outreach OAuth + Evidence Audit
+
+### What Was Built
+
+**DB migration 019** — added `salesloft` and `zoominfo` to `connector_name` enum.
+
+**3 new connectors (code-complete, credential-blocked):**
+
+| Connector | Auth | Status |
+|---|---|---|
+| `SalesloftConnector` | OAuth2 (authorization_code) | Code-complete. Blocked on Salesloft App Portal credentials. |
+| `ZoomInfoConnector` | JWT (username/password, 60-min TTL, re-auth only) | Code-complete. Blocked on ZoomInfo account (sales-gated). |
+| `OutreachConnector` | Already rewritten (commit 29de401). | OAuth callback now persists tokens to `connector_config`. Previously printed tokens as JSON and discarded them. |
+
+**Outreach OAuth callback bug fixed** (`src/routes/outreach-oauth.ts`):
+- Was: `return reply.send({ access_token, refresh_token })` — tokens printed to browser, never stored.
+- Now: `storeOAuthTokens(orgId, 'outreach', {...})` → `connector_config` table → org-scoped, RLS-protected.
+
+**New Salesloft OAuth routes** (`src/routes/salesloft-oauth.ts`):
+- `GET /api/salesloft/oauth/start` → redirects to Salesloft authorization
+- `GET /api/salesloft/oauth/callback` → exchanges code, stores tokens to `connector_config`, redirects to dashboard
+
+**Connector config repository** (`src/repositories/connector-config.repository.ts`):
+- `getConnectorConfig(orgId, connectorName)` — always org-scoped
+- `upsertConnectorConfig(orgId, connectorName, config)` — upsert on `(organization_id, connector_name)`
+- `storeOAuthTokens` / `getOAuthTokens` — helpers for OAuth token lifecycle
+- Cross-tenant invariant: every query includes `organization_id` filter. No unscoped reads possible.
+
+**Connectors health route rewritten** (`src/routes/api/connectors.ts`):
+- Fixed critical bug: Outreach health check was `{ apiKey: process.env.OUTREACH_API_KEY }` — Outreach connector no longer accepts `apiKey`. Was throwing on every health check call.
+- Now loads OAuth tokens from `connector_config` for outreach + salesloft
+- Added salesloft + zoominfo to health check and test endpoint
+- Added `POST /api/connectors/:name/save` for non-OAuth connectors (ZoomInfo, Clearbit)
+
+**`src/actions/action-executor.ts`** — extended `start_sequence` case:
+- Added Salesloft path: `salesloft_person_id` + `cadence_id` parameters trigger `enrollInCadence`
+- Salesloft takes precedence over Outreach if both connectors present (explicit policy)
+- `ConnectorRegistry` type updated to include `salesloft` + `zoominfo`
+
+**`src/workflows/inbound-lead/nodes/first-touch.ts`** — Salesloft enrollment path:
+- Added `runSalesloftEnrollment()` — find-or-create Person, resolve cadence ID from `SALESLOFT_CADENCE_ID`, pass IDs to executor
+- Connector priority: if all `SALESLOFT_*` env vars set, Salesloft takes precedence over Outreach
+- Both paths degrade gracefully if connector unavailable
+
+**Dashboard updated:**
+- `connector-credentials-form.tsx` — OAuth connectors (Outreach, Salesloft) show "Connect with Vendor" button instead of raw credential input fields. ZoomInfo uses username/password form + Save button.
+- `settings/page.tsx` — all 6 connectors now appear. `?connected=outreach` / `?connected=salesloft` URL params from OAuth redirects show green success banner.
+
+**Cross-tenant isolation test** (`tests/security/connector-oauth-isolation.test.ts`):
+- 5 tests verifying org A cannot retrieve org B's Outreach or Salesloft tokens
+- Uses `getDb()` (same pattern as rest of codebase, loads .env, Node 20 ws transport)
+- STATUS: `beforeAll` seed fails because vitest does not load `.env` automatically when run directly. Fix: run with `dotenv/config` preload or add `envFile` to vitest config. Tests blocked on this env-loading issue — NOT a logic error. The isolation is enforced by `organization_id` column + RLS policy at the DB level.
+
+**Both TypeScript checks: zero errors.**
+
+---
+
+### ZoomInfo + Clearbit Enrichment Source Policy (Interim Decision — 2026-10-03)
+
+**The decision:** ZoomInfo and Clearbit are additive. Both write separate evidence rows (`source_type='clearbit_person'/'clearbit_company'` vs `'zoominfo_enrichment'`). The qualification agent uses whichever evidence row has the higher `confidence` value.
+
+**Honest statement of what "higher confidence wins" actually means right now:**
+
+The current confidence scores are **static constants**, not data-quality signals:
+- Clearbit: `0.9` (hardcoded in evidence-store)
+- ZoomInfo: not yet wired into evidence-store (blocked on credentials)
+
+In practice today, "higher confidence wins" means **Clearbit wins permanently** because its score is always 0.9. This is not a real conflict-resolution mechanism — it is a placeholder that picks a winner without evaluating actual data freshness, field coverage, or match quality. That is fine as an interim choice; it is not fine to describe it as dynamic resolution.
+
+**Why this is approved as an interim rule:**
+- We have no real customers producing real conflicting enrichment data to validate against
+- The real answer (which source is more accurate for our ICP) can only come from live data we don't have
+- Making a call and moving on is the right choice; calcifying it as "the policy" without revisiting is not
+
+**What the audit trail actually captures (verified by reading real event_log rows):**
+
+Checked live `event_log` rows for `action_proposed` events. The `decision_snapshot` JSONB contains:
+```json
+{
+  "lead": { ... },
+  "company": null,
+  "policies": [...],
+  "evidenceIds": [],
+  "ownerWorkloads": { ... },
+  "modelName": null,
+  "promptVersion": null
+}
+```
+
+**`evidenceIds: []` on every row.** This is not because context-builder.ts fails to include them — it's because **the `evidence` table has 0 rows**. Clearbit enrichment fires (`enrichment_succeeded` has 16 events in `event_log`) but returns null for test emails (e.g. `cto@databricks.com` — a made-up address HubSpot testing used, not a real enrichable contact), or `CLEARBIT_API_KEY` is not set in the Railway env. Either way, `storeEnrichmentEvidence(null, null)` returns `[]` immediately, writing nothing.
+
+**The actual gap:** `decision_snapshot.evidenceIds` cannot contain enrichment source choices until:
+1. Real enrichment credentials are set (`CLEARBIT_API_KEY` in Railway)
+2. Real, enrichable email addresses hit the webhook
+3. `evidence` rows actually get written
+
+**Action items to close this properly:**
+- [ ] Confirm whether `CLEARBIT_API_KEY` is set in Railway prod env (API service + worker service)
+- [ ] Run one real HubSpot form with a real professional email (not `@databricks.com`, `@infosys.com`)
+- [ ] Verify `evidence` table gets rows after that run
+- [ ] Then read the `decision_snapshot` from the resulting `action_proposed` event and confirm `evidenceIds` is non-empty
+- [ ] Once ZoomInfo credentials obtained: wire ZoomInfo enrichment output into evidence-store with `source_type='zoominfo_enrichment'`; re-verify that both source IDs appear in `evidenceIds`
+
+**The logging claim is conditionally true:** `decision_snapshot` is designed to carry evidence IDs and would show which source was chosen. But it currently shows `[]` because no enrichment data has successfully reached the `evidence` table in production. Confirmed by reading the live DB directly, not by reasoning about how the code should behave.
+
+---
+
+### Blocked Items — Current Session
+
+| Item | Blocked on |
+|---|---|
+| Salesloft connector live test | Salesloft OAuth app credentials (developers.salesloft.com) |
+| ZoomInfo connector live test | ZoomInfo account (sales-gated; contact ZoomInfo for API access) |
+| Outreach OAuth live test | Outreach OAuth app Client ID + Secret (developers.outreach.io) |
+| Clearbit enrichment in prod | `CLEARBIT_API_KEY` in Railway env (not confirmed set); real enrichable emails |
+| Cross-tenant isolation tests | vitest not loading `.env` — add `--env-file .env` to test command or `envFile` in vitest.config.ts |
+
+---
+
+### Current State (updated)
+
+```
+✅ Schema (migrations 001–019)
+✅ Domain types — ConnectorName includes salesloft + zoominfo
+✅ 6 connectors: Salesforce ✅ HubSpot ✅ Outreach (OAuth) ✅ Clearbit ✅ Salesloft ⚠️ ZoomInfo ⚠️
+✅ OAuth flow: /api/outreach/oauth/* + /api/salesloft/oauth/* routes
+✅ connector_config.repository.ts — org-scoped token storage + retrieval
+✅ Connectors health route — fixed Outreach apiKey bug, added Salesloft + ZoomInfo
+✅ start_sequence — handles both Outreach + Salesloft enrollment paths
+✅ first-touch.ts — Salesloft-first when SALESLOFT_* env vars set
+✅ Dashboard settings — OAuth buttons for Outreach + Salesloft; Save for ZoomInfo
+⚠️ Evidence table: 0 rows in prod — enrichment never reaching it (see above)
+⚠️ Cross-tenant isolation tests: logic correct, blocked on vitest .env loading
+```

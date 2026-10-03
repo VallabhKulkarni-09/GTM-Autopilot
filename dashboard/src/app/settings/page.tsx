@@ -8,16 +8,30 @@ import { CheckCircle2, XCircle, Globe, ArrowRight, AlertTriangle } from 'lucide-
 export const dynamic = 'force-dynamic'
 
 const CONNECTOR_DISPLAY: Record<string, { label: string; description: string; emoji: string }> = {
-  hubspot:    { label: 'HubSpot',    description: 'Inbound webhook source',  emoji: '🟠' },
-  salesforce: { label: 'Salesforce', description: 'CRM & task creation',     emoji: '🔵' },
-  outreach:   { label: 'Outreach',   description: 'Sequence enrollment',     emoji: '🟣' },
-  clearbit:   { label: 'Clearbit',   description: 'Lead enrichment',         emoji: '🟡' },
+  hubspot:    { label: 'HubSpot',    description: 'Inbound webhook source',       emoji: '🟠' },
+  salesforce: { label: 'Salesforce', description: 'CRM & task creation',          emoji: '🔵' },
+  outreach:   { label: 'Outreach',   description: 'Sequence enrollment (OAuth2)', emoji: '🟣' },
+  clearbit:   { label: 'Clearbit',   description: 'Lead enrichment',              emoji: '🟡' },
+  salesloft:  { label: 'Salesloft',  description: 'Cadence enrollment (OAuth2)',  emoji: '🟤' },
+  zoominfo:   { label: 'ZoomInfo',   description: 'Contact & company enrichment', emoji: '🔷' },
 }
 
-export default async function SettingsPage() {
+// OAuth connectors — show connected badge when ?connected=<name> in URL
+const OAUTH_CONNECTORS = new Set(['outreach', 'salesloft'])
+
+export default async function SettingsPage({
+  searchParams,
+}: {
+  searchParams?: Promise<{ connected?: string; error?: string }>
+}) {
   let connectors: ConnectorHealth[]
   let policies: PolicyRule[]
   const token = getServerToken()
+
+  // Which connector just completed OAuth (from redirect ?connected=outreach etc.)
+  const resolvedParams = (await (searchParams ?? Promise.resolve({} as { connected?: string; error?: string }))) as { connected?: string; error?: string }
+  const justConnected  = resolvedParams.connected ?? null
+  const oauthError     = resolvedParams.error ?? null
 
   try {
     const [cr, pr] = await Promise.all([
@@ -49,9 +63,21 @@ export default async function SettingsPage() {
     )
   }
 
+  // Merge live connector data with any connectors not returned by the API yet
+  const ALL_CONNECTOR_NAMES = ['hubspot', 'salesforce', 'outreach', 'clearbit', 'salesloft', 'zoominfo']
+  const connectorMap = new Map(connectors.map(c => [c.name, c]))
+  const allConnectors = ALL_CONNECTOR_NAMES.map(name =>
+    connectorMap.get(name) ?? {
+      name,
+      status: 'unhealthy' as const,
+      lastChecked: new Date().toISOString(),
+      error: 'Not yet configured',
+    }
+  )
+
   const slaPolicy      = policies.find(p => p.rule_type === 'sla')
   const territoryRules = policies.filter(p => p.rule_type === 'territory')
-  const healthyCount   = connectors.filter(c => c.status === 'healthy').length
+  const healthyCount   = allConnectors.filter(c => c.status === 'healthy').length
 
   return (
     <div className="flex flex-col gap-7 max-w-2xl animate-fade-in">
@@ -62,9 +88,34 @@ export default async function SettingsPage() {
           System Health
         </h1>
         <p className="text-[13px] mt-1" style={{ color: 'var(--apple-text-tertiary)' }}>
-          {healthyCount}/{connectors.length} connectors healthy · Policies v1
+          {healthyCount}/{allConnectors.length} connectors healthy · Policies v1
         </p>
       </div>
+
+      {/* ── OAuth success/error banner ───────────────────────────── */}
+      {justConnected && (
+        <div
+          className="rounded-2xl p-4 flex items-center gap-3"
+          style={{ background: 'rgba(52,199,89,0.08)', border: '1px solid rgba(52,199,89,0.20)' }}
+        >
+          <CheckCircle2 size={18} style={{ color: 'var(--apple-green)', flexShrink: 0 }} />
+          <span className="text-[14px] font-semibold" style={{ color: 'var(--apple-green)' }}>
+            {CONNECTOR_DISPLAY[justConnected]?.label ?? justConnected} connected successfully.
+            Tokens are stored securely for your organization.
+          </span>
+        </div>
+      )}
+      {oauthError && (
+        <div
+          className="rounded-2xl p-4 flex items-center gap-3"
+          style={{ background: 'rgba(255,59,48,0.07)', border: '1px solid rgba(255,59,48,0.15)' }}
+        >
+          <AlertTriangle size={18} style={{ color: 'var(--apple-red)', flexShrink: 0 }} />
+          <span className="text-[14px] font-semibold" style={{ color: 'var(--apple-red)' }}>
+            OAuth error: {oauthError.replace(/_/g, ' ')}. Please try again.
+          </span>
+        </div>
+      )}
 
       {/* ── Connectors — iOS Inset Grouped List ─────────────────── */}
       <section>
@@ -75,13 +126,15 @@ export default async function SettingsPage() {
           Connectors
         </div>
 
-        {/* Inset group wrapper */}
         <div className="apple-inset-group">
-          {connectors.map((conn, i) => {
-            const display = CONNECTOR_DISPLAY[conn.name] ?? { label: conn.name, description: '', emoji: '⚪' }
-            const isOk    = conn.status === 'healthy'
-            const isFirst = i === 0
-            const isLast  = i === connectors.length - 1
+          {allConnectors.map((conn, i) => {
+            const display     = CONNECTOR_DISPLAY[conn.name] ?? { label: conn.name, description: '', emoji: '⚪' }
+            const isOk        = conn.status === 'healthy'
+            const isFirst     = i === 0
+            const isLast      = i === allConnectors.length - 1
+            const isOAuthConn = OAUTH_CONNECTORS.has(conn.name)
+            // Show connected badge if connector just returned from OAuth OR if already healthy
+            const showConnected = conn.name === justConnected || isOk
             const radius  = isFirst && isLast ? '10px'
                           : isFirst ? '10px 10px 0 0'
                           : isLast  ? '0 0 10px 10px'
@@ -97,7 +150,6 @@ export default async function SettingsPage() {
               >
                 {/* Status row */}
                 <div className="flex items-center gap-3 px-4 py-3.5">
-                  {/* Icon */}
                   <div
                     className="w-9 h-9 rounded-[10px] flex items-center justify-center flex-shrink-0 text-[18px]"
                     style={{
@@ -108,7 +160,6 @@ export default async function SettingsPage() {
                     {display.emoji}
                   </div>
 
-                  {/* Name + desc */}
                   <div className="flex-1 min-w-0">
                     <div className="text-[15px] font-medium" style={{ color: 'var(--apple-text-primary)' }}>
                       {display.label}
@@ -118,7 +169,6 @@ export default async function SettingsPage() {
                     </div>
                   </div>
 
-                  {/* Status badge + last checked */}
                   <div className="flex items-center gap-2 flex-shrink-0">
                     <span
                       className="flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-semibold"
@@ -139,13 +189,17 @@ export default async function SettingsPage() {
                   </div>
                 </div>
 
-                {/* ── Credentials form — expands below the status row ── */}
+                {/* Credentials / OAuth button — expands below the status row */}
                 <div
                   className="px-4 pb-4"
                   style={{ borderTop: '1px solid var(--apple-separator)' }}
                 >
                   <div className="pt-3">
-                    <ConnectorCredentialsForm connectorName={conn.name} token={token} />
+                    <ConnectorCredentialsForm
+                      connectorName={conn.name}
+                      token={token}
+                      isConnected={showConnected && isOAuthConn}
+                    />
                   </div>
                 </div>
               </div>
@@ -154,7 +208,7 @@ export default async function SettingsPage() {
         </div>
       </section>
 
-      {/* ── SLA Policy — Inset Grouped ───────────────────────────── */}
+      {/* ── SLA Policy ───────────────────────────────────────────── */}
       <section>
         <div
           className="text-[11px] font-semibold uppercase tracking-[0.07em] mb-2 px-1"
@@ -185,7 +239,7 @@ export default async function SettingsPage() {
         </div>
       </section>
 
-      {/* ── Territory Rules — Inset Grouped ─────────────────────── */}
+      {/* ── Territory Rules ──────────────────────────────────────── */}
       <section>
         <div
           className="text-[11px] font-semibold uppercase tracking-[0.07em] mb-2 px-1"

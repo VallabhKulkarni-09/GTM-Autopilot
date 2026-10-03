@@ -21,6 +21,7 @@ import { metricsRoutes }       from './routes/api/metrics.js'
 import { connectorRoutes }     from './routes/api/connectors.js'
 import { policyRoutes }        from './routes/api/policies.js'
 import { outreachOAuthRoutes } from './routes/outreach-oauth.js'
+import { salesloftOAuthRoutes } from './routes/salesloft-oauth.js'
 
 export function buildApp() {
   const app = Fastify({
@@ -58,8 +59,9 @@ export function buildApp() {
   app.register(connectorRoutes,     { prefix: '/api/connectors' })
   app.register(policyRoutes,        { prefix: '/api/policies' })
 
-  // Outreach OAuth setup utility (no tenant middleware — one-time credential bootstrap)
-  app.register(outreachOAuthRoutes, { prefix: '/api/outreach/oauth' })
+  // Outreach + Salesloft OAuth setup (no tenant middleware — credential bootstrap)
+  app.register(outreachOAuthRoutes,  { prefix: '/api/outreach/oauth' })
+  app.register(salesloftOAuthRoutes, { prefix: '/api/salesloft/oauth' })
 
 
   // ─── Health check — required by Railway ───────────────────────────────────

@@ -125,7 +125,8 @@ export type ActionExecutionStatus =
   | 'failed'
   | 'deduplicated'
 
-export type ConnectorName = 'salesforce' | 'hubspot' | 'outreach' | 'clearbit'
+export type ConnectorName = 'salesforce' | 'hubspot' | 'outreach' | 'clearbit' | 'salesloft' | 'zoominfo'
+
 
 export type ConnectorHealthStatus = 'healthy' | 'degraded' | 'unhealthy' | 'unknown'
 

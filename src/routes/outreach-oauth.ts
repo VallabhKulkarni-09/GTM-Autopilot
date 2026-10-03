@@ -1,35 +1,36 @@
 /**
  * src/routes/outreach-oauth.ts
  *
- * Setup utility for bootstrapping Outreach OAuth2 credentials.
+ * OAuth2 setup routes for Outreach connector.
+ * After the callback succeeds, tokens are persisted to connector_config
+ * (org-scoped, RLS-protected) so the connector works across restarts.
  *
- * Routes (NOT protected by tenantContextMiddleware — they are setup-only):
+ * Routes:
+ *   GET /api/outreach/oauth/start    → redirects to Outreach authorization URL
+ *   GET /api/outreach/oauth/callback → exchanges code for tokens, stores in DB,
+ *                                      redirects to dashboard with ?connected=outreach
  *
- *   GET /api/outreach/oauth/start
- *     Redirects the browser to Outreach's authorization URL.
- *     Use this once to start the OAuth dance.
- *
- *   GET /api/outreach/oauth/callback
- *     Outreach redirects here with ?code=... after authorization.
- *     Exchanges the code for access_token + refresh_token and returns
- *     them as JSON. Copy these values into Railway env vars:
- *       OUTREACH_ACCESS_TOKEN
- *       OUTREACH_REFRESH_TOKEN
- *
- * Security note: These routes are dev-only setup utilities. They do not
- * store tokens themselves — they print them for manual copy to env vars.
- * Do NOT expose these routes in production without authentication guards.
+ * State parameter: `<organizationId>:<csrfToken>` — used to correlate the callback
+ * to the right org and prevent CSRF.
  *
  * Env vars required at startup:
  *   OUTREACH_CLIENT_ID
  *   OUTREACH_CLIENT_SECRET
  *   OUTREACH_REDIRECT_URI (= https://gtm-api-production-adc0.up.railway.app/api/outreach/oauth/callback)
+ *   DASHBOARD_URL (= https://gtm-autopilot-dashboard.vercel.app)
+ *
+ * ⚠️ CREDENTIAL ACCESS NOTE:
+ *   This route is code-complete. Live verification is blocked on obtaining an
+ *   Outreach OAuth app Client ID + Secret from developers.outreach.io.
+ *   See PROGRESS.md for status.
  */
 
+import { randomBytes } from 'crypto'
 import type { FastifyInstance } from 'fastify'
 import { ConnectorError } from '../connectors/base.js'
 import { OutreachErrorCode } from '../connectors/outreach/outreach.errors.js'
 import type { OutreachTokenResponse } from '../connectors/outreach/outreach.types.js'
+import { storeOAuthTokens } from '../repositories/connector-config.repository.js'
 
 const OR_AUTHORIZE_URL = 'https://api.outreach.io/oauth/authorize'
 const OR_TOKEN_URL     = 'https://api.outreach.io/oauth/token'
@@ -43,49 +44,57 @@ const REQUIRED_SCOPES = [
 ].join(' ')
 
 export async function outreachOAuthRoutes(app: FastifyInstance): Promise<void> {
+
   // ── GET /api/outreach/oauth/start ──────────────────────────────────────────
-  // Redirects browser to Outreach authorization page.
-  app.get('/start', async (_req, reply) => {
-    const clientId    = process.env.OUTREACH_CLIENT_ID
-    const redirectUri = process.env.OUTREACH_REDIRECT_URI
-
-    if (!clientId || !redirectUri) {
-      return reply.status(500).send({
-        error: 'OUTREACH_NOT_CONFIGURED',
-        message: 'OUTREACH_CLIENT_ID and OUTREACH_REDIRECT_URI must be set in env vars',
-      })
-    }
-
-    const params = new URLSearchParams({
-      client_id:     clientId,
-      redirect_uri:  redirectUri,
-      response_type: 'code',
-      scope:         REQUIRED_SCOPES,
-    })
-
-    return reply.redirect(`${OR_AUTHORIZE_URL}?${params.toString()}`)
-  })
-
-  // ── GET /api/outreach/oauth/callback ───────────────────────────────────────
-  // Outreach redirects here after user authorization.
-  // Exchanges ?code for tokens and returns them as JSON.
-  app.get<{ Querystring: { code?: string; error?: string } }>(
-    '/callback',
+  app.get<{ Querystring: { org_id?: string } }>(
+    '/start',
     async (req, reply) => {
-      const { code, error } = req.query
+      const clientId    = process.env.OUTREACH_CLIENT_ID
+      const redirectUri = process.env.OUTREACH_REDIRECT_URI
 
-      if (error) {
-        return reply.status(400).send({
-          error: 'OUTREACH_AUTH_DENIED',
-          message: `Outreach authorization denied: ${error}`,
+      if (!clientId || !redirectUri) {
+        return reply.status(500).send({
+          error: 'OUTREACH_NOT_CONFIGURED',
+          message: 'OUTREACH_CLIENT_ID and OUTREACH_REDIRECT_URI must be set in env vars',
         })
       }
 
-      if (!code) {
-        return reply.status(400).send({
-          error: 'MISSING_CODE',
-          message: 'No authorization code in callback query params',
-        })
+      // org_id comes from the query param (set by the dashboard "Connect" button)
+      // state = orgId:csrfToken — correlates callback to the right org
+      const orgId = req.query.org_id ?? process.env.DEFAULT_ORG_ID ?? ''
+      const csrf  = randomBytes(16).toString('hex')
+      const state = `${orgId}:${csrf}`
+
+      const params = new URLSearchParams({
+        client_id:     clientId,
+        redirect_uri:  redirectUri,
+        response_type: 'code',
+        scope:         REQUIRED_SCOPES,
+        state,
+      })
+
+      return reply.redirect(`${OR_AUTHORIZE_URL}?${params.toString()}`)
+    }
+  )
+
+  // ── GET /api/outreach/oauth/callback ───────────────────────────────────────
+  app.get<{ Querystring: { code?: string; state?: string; error?: string } }>(
+    '/callback',
+    async (req, reply) => {
+      const dashboardUrl = process.env.DASHBOARD_URL ?? 'https://gtm-autopilot-dashboard.vercel.app'
+      const { code, state, error } = req.query
+
+      if (error) {
+        return reply.redirect(`${dashboardUrl}/settings?error=outreach_denied`)
+      }
+      if (!code || !state) {
+        return reply.redirect(`${dashboardUrl}/settings?error=outreach_missing_code`)
+      }
+
+      // Parse state to extract orgId
+      const [orgId] = state.split(':')
+      if (!orgId) {
+        return reply.redirect(`${dashboardUrl}/settings?error=outreach_invalid_state`)
       }
 
       const clientId     = process.env.OUTREACH_CLIENT_ID
@@ -93,10 +102,7 @@ export async function outreachOAuthRoutes(app: FastifyInstance): Promise<void> {
       const redirectUri  = process.env.OUTREACH_REDIRECT_URI
 
       if (!clientId || !clientSecret || !redirectUri) {
-        return reply.status(500).send({
-          error: 'OUTREACH_NOT_CONFIGURED',
-          message: 'OUTREACH_CLIENT_ID, OUTREACH_CLIENT_SECRET, and OUTREACH_REDIRECT_URI must be set',
-        })
+        return reply.redirect(`${dashboardUrl}/settings?error=outreach_not_configured`)
       }
 
       let tokens: OutreachTokenResponse
@@ -112,7 +118,6 @@ export async function outreachOAuthRoutes(app: FastifyInstance): Promise<void> {
             code,
           }).toString(),
         })
-
         if (!res.ok) {
           const raw = await res.text()
           throw new ConnectorError(
@@ -120,27 +125,27 @@ export async function outreachOAuthRoutes(app: FastifyInstance): Promise<void> {
             'Outreach token exchange failed'
           )
         }
-
         tokens = await res.json() as OutreachTokenResponse
       } catch (err) {
         req.log.error({ err }, '[outreach-oauth] Token exchange failed')
-        return reply.status(502).send({
-          error:   'TOKEN_EXCHANGE_FAILED',
-          message: err instanceof ConnectorError ? err.message : String(err),
-        })
+        return reply.redirect(`${dashboardUrl}/settings?error=outreach_token_exchange_failed`)
       }
 
-      // Return tokens as JSON — copy these into Railway env vars manually.
-      // Never store tokens here — Railway env vars are the secret store for MVP.
-      return reply.status(200).send({
-        message: 'OAuth success. Copy these values into Railway env vars.',
-        instructions: {
-          OUTREACH_ACCESS_TOKEN:  tokens.access_token,
-          OUTREACH_REFRESH_TOKEN: tokens.refresh_token,
-          expires_in_seconds:     tokens.expires_in,
-          scope:                  tokens.scope,
-        },
-      })
+      // Persist tokens to connector_config (org-scoped)
+      try {
+        await storeOAuthTokens(orgId, 'outreach', {
+          access_token:  tokens.access_token,
+          refresh_token: tokens.refresh_token,
+          expires_at:    Date.now() + (tokens.expires_in ?? 7200) * 1000,
+          scope:         tokens.scope,
+        })
+      } catch (err) {
+        req.log.error({ err }, '[outreach-oauth] Failed to persist tokens to connector_config')
+        return reply.redirect(`${dashboardUrl}/settings?error=outreach_token_storage_failed`)
+      }
+
+      req.log.info({ orgId }, '[outreach-oauth] Tokens stored successfully for org')
+      return reply.redirect(`${dashboardUrl}/settings?connected=outreach`)
     }
   )
 }

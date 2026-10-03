@@ -33,7 +33,13 @@ export type ConnectorRegistry = {
     createProspect(input: { email: string; firstName?: string; lastName?: string; title?: string }, idempotencyKey: string): Promise<{ id: string }>
     enrollInSequence(prospectId: string, sequenceId: string, idempotencyKey: string): Promise<{ id: string }>
   }
+  salesloft: {
+    getPersonByEmail(email: string): Promise<{ id: number } | null>
+    createPerson(input: { email_address: string; first_name?: string; last_name?: string; title?: string }, idempotencyKey: string): Promise<{ id: number }>
+    enrollInCadence(personId: number, cadenceId: number, idempotencyKey: string): Promise<{ id: number }>
+  }
   clearbit: unknown
+  zoominfo: unknown
 }
 
 // ─── Idempotency check ────────────────────────────────────────────────────────
@@ -300,55 +306,98 @@ export async function executeAction(
 
       // ── start_sequence ─────────────────────────────────────────────────────
       case 'start_sequence': {
-        const { outreach_prospect_id, sequence_id } = action.parameters as {
-          outreach_prospect_id: string; sequence_id: string
+        const params = action.parameters as {
+          outreach_prospect_id?: string
+          sequence_id?:          string
+          salesloft_person_id?:  string
+          cadence_id?:           string
         }
 
-        const outreachAvailable = !!connectors?.outreach && !!outreach_prospect_id && !!sequence_id
+        // ── Outreach enrollment path ──────────────────────────────────────────
+        const outreachAvailable = !!connectors?.outreach
+          && !!params.outreach_prospect_id
+          && !!params.sequence_id
         let sequenceStateId: string | undefined
 
         if (outreachAvailable) {
-          const seqState = await connectors.outreach.enrollInSequence(outreach_prospect_id, sequence_id, key)
+          const seqState = await connectors.outreach.enrollInSequence(
+            params.outreach_prospect_id!, params.sequence_id!, key
+          )
           sequenceStateId = seqState.id
-
-          // Store Outreach sequenceState ID in external_identity (best-effort, non-fatal)
           try {
             await getDb().from('external_identity').insert({
               organization_id: action.target.organizationId ?? organizationId,
               entity_type:     'lead',
               entity_id:       action.target.leadId,
               provider:        'outreach',
-              external_id:     outreach_prospect_id,
+              external_id:     params.outreach_prospect_id,
               metadata: {
-                sequence_id,
+                sequence_id:       params.sequence_id,
                 sequence_state_id: sequenceStateId,
-                enrolled_by: 'action-executor:start_sequence',
+                enrolled_by:       'action-executor:start_sequence',
               },
             })
           } catch { /* duplicate key — idempotent, ignore */ }
-        } else {
+        }
+
+        // ── Salesloft enrollment path ─────────────────────────────────────────
+        const salesloftAvailable = !outreachAvailable
+          && !!connectors?.salesloft
+          && !!params.salesloft_person_id
+          && !!params.cadence_id
+        let cadenceMembershipId: number | undefined
+
+        if (salesloftAvailable) {
+          const membership = await connectors.salesloft.enrollInCadence(
+            Number(params.salesloft_person_id!), Number(params.cadence_id!), key
+          )
+          cadenceMembershipId = membership.id
+          try {
+            await getDb().from('external_identity').insert({
+              organization_id: action.target.organizationId ?? organizationId,
+              entity_type:     'lead',
+              entity_id:       action.target.leadId,
+              provider:        'salesloft',
+              external_id:     params.salesloft_person_id,
+              metadata: {
+                cadence_id:            params.cadence_id,
+                cadence_membership_id: cadenceMembershipId,
+                enrolled_by:           'action-executor:start_sequence',
+              },
+            })
+          } catch { /* duplicate key — idempotent, ignore */ }
+        }
+
+        // ── Warn if neither enrolled ──────────────────────────────────────────
+        if (!outreachAvailable && !salesloftAvailable) {
           console.warn(
-            `[action-executor] start_sequence: Outreach connector unavailable ` +
-            `(outreachAvailable=${outreachAvailable}, prospectId=${outreach_prospect_id ?? 'missing'}, ` +
-            `sequenceId=${sequence_id ?? 'missing'}) — enrollment skipped for org ${organizationId}`
+            `[action-executor] start_sequence: no SEP connector available — enrollment skipped. ` +
+            `outreach_prospect_id=${params.outreach_prospect_id ?? 'missing'}, ` +
+            `sequence_id=${params.sequence_id ?? 'missing'}, ` +
+            `salesloft_person_id=${params.salesloft_person_id ?? 'missing'}, ` +
+            `cadence_id=${params.cadence_id ?? 'missing'} (org=${organizationId})`
           )
         }
 
+        const enrolled = outreachAvailable || salesloftAvailable
         await updatePlayInstance(playInstanceId, organizationId, {
           first_touch_at: new Date().toISOString(),
           status: 'completed',
-          ...(outreachAvailable ? { sequence_id } : {}),
-          ...(outreachAvailable ? { enrolled_at: new Date().toISOString() } : {}),
+          ...(outreachAvailable ? { sequence_id: params.sequence_id, enrolled_at: new Date().toISOString() } : {}),
+          ...(salesloftAvailable ? { cadence_id: params.cadence_id, enrolled_at: new Date().toISOString() } : {}),
         })
-        await updateLead(action.target.leadId, organizationId, { stage: 'in_sequence' })
+        await updateLead(action.target.leadId, organizationId, { stage: enrolled ? 'in_sequence' : 'nurture' })
         result = {
           success: true,
-          ...(sequenceStateId ? { externalSystem: 'outreach' as ConnectorName, externalId: sequenceStateId } : {}),
+          ...(outreachAvailable && sequenceStateId ? { externalSystem: 'outreach' as ConnectorName, externalId: sequenceStateId } : {}),
+          ...(salesloftAvailable && cadenceMembershipId ? { externalSystem: 'salesloft' as ConnectorName, externalId: String(cadenceMembershipId) } : {}),
           output: {
-            sequence_id,
-            outreach_synced: outreachAvailable,
-            ...(outreach_prospect_id ? { outreach_prospect_id } : {}),
+            outreach_synced:  outreachAvailable,
+            salesloft_synced: salesloftAvailable,
+            ...(params.outreach_prospect_id ? { outreach_prospect_id: params.outreach_prospect_id } : {}),
             ...(sequenceStateId ? { sequence_state_id: sequenceStateId } : {}),
+            ...(params.salesloft_person_id ? { salesloft_person_id: params.salesloft_person_id } : {}),
+            ...(cadenceMembershipId ? { cadence_membership_id: cadenceMembershipId } : {}),
           },
         }
         break
