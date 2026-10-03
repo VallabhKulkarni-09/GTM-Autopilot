@@ -27,7 +27,7 @@ type ConnectorHealth = {
   error?: string
 }
 
-type ConnectorName = 'salesforce' | 'hubspot' | 'outreach' | 'clearbit'
+type ConnectorName = 'salesforce' | 'hubspot' | 'outreach' | 'clearbit' | 'salesloft' | 'zoominfo' | 'apollo'
 ```
 
 ## ConnectorError — The Only Allowed Error Type

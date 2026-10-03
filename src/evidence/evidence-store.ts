@@ -176,3 +176,131 @@ export async function getLeadEvidence(
   if (error) throw new Error(`[evidence-store] getLeadEvidence failed: ${error.message}`)
   return (data ?? []) as Evidence[]
 }
+
+// ─── Apollo Enrichment ────────────────────────────────────────────────────────
+// Separate from Clearbit's function — different field names, different fact extraction.
+// source_type = 'apollo_enrichment' (single row type, not split person/company).
+
+/**
+ * Stores Apollo people/match enrichment as evidence rows.
+ *
+ * Each logical fact from the response becomes one row, for granular querying.
+ * The full raw Apollo response is stored in the first row's `data._raw` for audit.
+ *
+ * Facts extracted (based on REAL Apollo response shape, not documentation examples):
+ *   apollo_person_title          → person.title (current job title)
+ *   apollo_person_location       → person.{city, state, country}
+ *   apollo_person_linkedin       → person.linkedin_url
+ *   apollo_person_match_meta     → {match_confidence, apollo_id, email_status}
+ *   apollo_company_firmographics → org.{name, domain, industry, employee_count,
+ *                                       annual_revenue, funding_stage, country}
+ *
+ * REQUIRES: match is non-null (caller must guard match_confidence !== 'none' before calling).
+ * Throws if called with null — same contract as storeEnrichmentEvidence.
+ */
+export async function storeApolloEnrichmentEvidence(
+  organizationId: string,
+  leadId:         string,
+  companyId:      string | null,
+  match:          import('../connectors/apollo/apollo.types.js').ApolloPersonMatch | null,
+): Promise<Evidence[]> {
+  if (!match) {
+    throw new Error(
+      `[evidence-store] storeApolloEnrichmentEvidence called with null match ` +
+      `(lead=${leadId}, org=${organizationId}). ` +
+      `The null case (match_confidence='none') must be handled by the caller as enrichment_skipped. ` +
+      `Do not pass null here.`
+    )
+  }
+
+  const now       = new Date().toISOString()
+  const expiresAt = thirtyDaysFromNow()
+  const sourceId  = match.apolloId
+
+  // Build fact rows from the real Apollo response fields.
+  // Each fact is independently queryable; the _raw is on match_meta for full audit trail.
+  const facts: Array<{ fact_type: string; fact_value: unknown }> = []
+
+  if (match.title) {
+    facts.push({ fact_type: 'apollo_person_title', fact_value: match.title })
+  }
+
+  if (match.location.city || match.location.state || match.location.country) {
+    facts.push({
+      fact_type: 'apollo_person_location',
+      fact_value: {
+        city:    match.location.city,
+        state:   match.location.state,
+        country: match.location.country,
+      },
+    })
+  }
+
+  if (match.linkedinUrl) {
+    facts.push({ fact_type: 'apollo_person_linkedin', fact_value: match.linkedinUrl })
+  }
+
+  // Always write match metadata + raw response (even if title/location are null)
+  // This is the audit row — it proves Apollo was called and what it returned.
+  facts.push({
+    fact_type: 'apollo_person_match_meta',
+    fact_value: {
+      apolloId:        match.apolloId,
+      matchConfidence: match.matchConfidence,
+      emailStatus:     match._raw.email_status ?? null,
+      _raw:            match._raw,              // full raw Apollo response
+    },
+  })
+
+  if (match.company) {
+    facts.push({
+      fact_type: 'apollo_company_firmographics',
+      fact_value: {
+        apolloOrgId:   match.company.apolloOrgId,
+        name:          match.company.name,
+        domain:        match.company.domain,
+        industry:      match.company.industry,
+        employeeCount: match.company.employeeCount,
+        annualRevenue: match.company.annualRevenue,
+        fundingStage:  match.company.fundingStage,
+        country:       match.company.country,
+      },
+    })
+  }
+
+  if (facts.length === 0) {
+    console.warn(
+      `[evidence-store] Apollo match returned for lead ${leadId} ` +
+      `(apolloId=${match.apolloId}, confidence=${match.matchConfidence}) ` +
+      `but no extractable facts found. 0 rows written.`
+    )
+    return []
+  }
+
+  const rows = facts.map(f => ({
+    organization_id: organizationId,
+    lead_id:         leadId,
+    company_id:      companyId,
+    source_type:     'apollo_enrichment' as const,
+    source_id:       sourceId,
+    data:            f,
+    is_current:      true,
+    collected_at:    now,
+    expires_at:      expiresAt,
+  }))
+
+  const { data, error } = await getDb()
+    .from('evidence')
+    .insert(rows)
+    .select()
+
+  if (error) throw new Error(`[evidence-store] storeApolloEnrichmentEvidence DB write failed: ${error.message}`)
+
+  console.info(
+    `[evidence-store] Wrote ${(data ?? []).length} Apollo evidence rows for lead ${leadId} ` +
+    `(apolloId=${match.apolloId}, confidence=${match.matchConfidence}, ` +
+    `ids: ${(data ?? []).map((r: any) => r.id).join(', ')}).`
+  )
+
+  return (data ?? []) as Evidence[]
+}

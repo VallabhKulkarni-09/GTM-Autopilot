@@ -35,6 +35,7 @@ export type EvidenceSourceType =
   | 'salesforce_contact'
   | 'intent_signal'
   | 'manual'
+  | 'apollo_enrichment'
 
 export type PolicyRuleType =
   | 'icp_filter'
@@ -125,7 +126,7 @@ export type ActionExecutionStatus =
   | 'failed'
   | 'deduplicated'
 
-export type ConnectorName = 'salesforce' | 'hubspot' | 'outreach' | 'clearbit' | 'salesloft' | 'zoominfo'
+export type ConnectorName = 'salesforce' | 'hubspot' | 'outreach' | 'clearbit' | 'salesloft' | 'zoominfo' | 'apollo'
 
 
 export type ConnectorHealthStatus = 'healthy' | 'degraded' | 'unhealthy' | 'unknown'
