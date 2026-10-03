@@ -58,6 +58,15 @@ vi.mock('../../db/client.js', () => {
   }
 })
 
+// Mock Clearbit — workflow unit tests don't test external enrichment.
+// The enrich node handles null (no match) via enrichment_skipped and continues.
+vi.mock('../../connectors/clearbit/clearbit.connector.js', () => ({
+  ClearbitConnector: class {
+    async connect() {}
+    async enrichByEmail(_email: string) { return null }
+  }
+}))
+
 vi.mock('../../agents/qualification/index.js', () => ({
   QualificationAgent: class {
     name = 'qualification-agent'

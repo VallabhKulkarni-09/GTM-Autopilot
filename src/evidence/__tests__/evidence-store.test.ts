@@ -105,24 +105,28 @@ const fullCompany: ClearbitCompany = {
 // ─── Tests: evidence-store ────────────────────────────────────────────────────
 
 describe('storeEnrichmentEvidence', () => {
-  it('null person + null company → returns [] without crashing', async () => {
+  it('null person + null company → throws (caller must guard against null, not pass it through)', async () => {
+    // Old behavior: returned [] silently. New behavior: throws so the bug is immediately visible.
+    // The null case means "no enrichment match found" — callers must log enrichment_skipped
+    // and NOT call storeEnrichmentEvidence with null inputs.
     const { storeEnrichmentEvidence } = await import('../evidence-store.js')
-    const result = await storeEnrichmentEvidence(ORG, LEAD_ID, null, null, null)
-    expect(result).toEqual([])
+    await expect(
+      storeEnrichmentEvidence(ORG, LEAD_ID, null, null, null, 'clearbit')
+    ).rejects.toThrow('storeEnrichmentEvidence called with both clearbitPerson=null and clearbitCompany=null')
   })
 
   it('creates correct number of evidence rows from Clearbit response', async () => {
     const { storeEnrichmentEvidence } = await import('../evidence-store.js')
     // Person gives 4 facts: title, seniority, role, location
     // Company gives 6 facts: employees, industry, revenue, country, type, tags
-    const result = await storeEnrichmentEvidence(ORG, LEAD_ID, 'company_1', fullPerson, fullCompany)
+    const result = await storeEnrichmentEvidence(ORG, LEAD_ID, 'company_1', fullPerson, fullCompany, 'clearbit')
     expect(result.length).toBe(10)
   })
 
   it('sets expires_at to approximately NOW() + 30 days', async () => {
     const { storeEnrichmentEvidence } = await import('../evidence-store.js')
     const before = Date.now()
-    const result = await storeEnrichmentEvidence(ORG, LEAD_ID, null, fullPerson, null)
+    const result = await storeEnrichmentEvidence(ORG, LEAD_ID, null, fullPerson, null, 'clearbit')
     const after = Date.now()
 
     expect(result.length).toBeGreaterThan(0)

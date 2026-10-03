@@ -189,15 +189,24 @@ export class ZoomInfoConnector implements Connector<ZoomInfoConfig> {
         'ZoomInfoConnector: config not set'
       )
     }
-    const res = await fetch(ZI_AUTH_URL, {
-      method:  'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body:    JSON.stringify({
-        username: this.config.username,
-        password: this.config.password,
-      }),
-      signal: AbortSignal.timeout(8_000),
-    })
+    let res: Response
+    try {
+      res = await fetch(ZI_AUTH_URL, {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify({
+          username: this.config.username,
+          password: this.config.password,
+        }),
+        signal: AbortSignal.timeout(8_000),
+      })
+    } catch (err: any) {
+      // Network error, ECONNREFUSED, AbortError, etc. — never leak as raw TypeError
+      throw new ConnectorError(
+        this.name, ZoomInfoErrorCode.AUTH_FAILED, 0, String(err),
+        `ZoomInfo authentication network error: ${err?.message ?? String(err)}`
+      )
+    }
     if (!res.ok) {
       const raw = await res.text()
       throw new ConnectorError(
