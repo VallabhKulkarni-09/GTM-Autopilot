@@ -8,8 +8,12 @@
 export const ApolloErrorCode = {
   // Auth
   AUTH_FAILED:           'AP_AUTH_FAILED',
+  // Scope / plan restriction
+  INSUFFICIENT_SCOPE:    'AP_INSUFFICIENT_SCOPE',
   // Enrichment
   ENRICH_FAILED:         'AP_ENRICH_FAILED',
+  // Rate limit
+  RATE_LIMITED:          'AP_RATE_LIMITED',
   // Config
   NOT_CONNECTED:         'AP_NOT_CONNECTED',
   // Network

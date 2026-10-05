@@ -304,3 +304,137 @@ export async function storeApolloEnrichmentEvidence(
 
   return (data ?? []) as Evidence[]
 }
+
+// ─── Apollo Organization Enrichment ──────────────────────────────────────────
+// Stores results from GET /api/v1/organizations/enrich (company-level only).
+// source_type = 'apollo_enrichment' (reuses same DB enum value).
+//
+// PLAN SCOPE NOTE: Apollo org endpoint provides company-level data only.
+// No person-level data (title, seniority, role) is available on this plan.
+// See PROGRESS.md: "Apollo plan scope limitation — company data only."
+//
+// CONFIDENCE: APOLLO_ORG_ENRICHMENT_CONFIDENCE = 0.82 — static, not dynamic.
+// See PROGRESS.md for honest statement.
+
+/**
+ * Static confidence score for Apollo organization enrichment.
+ * 0.82 — static, not dynamic, not field-level.
+ * Slightly below person-level Apollo score (0.85) because org data is less directly
+ * actionable for ICP scoring (we lose person-level signals entirely on this plan).
+ */
+export const APOLLO_ORG_ENRICHMENT_CONFIDENCE = 0.82
+
+/**
+ * Stores Apollo organizations/enrich results as evidence rows.
+ *
+ * Facts extracted (field names VERIFIED against real stripe.com response, 2026-10-05):
+ *   apollo_org_firmographics  → id, name, primary_domain, industry, industries,
+ *                               estimated_num_employees, organization_revenue, founded_year,
+ *                               city, state, country (top-level — NOT nested under geo)
+ *   apollo_org_funding        → total_funding, latest_funding_stage, latest_funding_round_date
+ *   apollo_org_tech_stack     → technology_names (list of tech stack items)
+ *   apollo_org_identity       → full _raw response for audit/replay
+ *
+ * REQUIRES: match is non-null (caller must guard: org endpoint returns {} for no-match).
+ * Throws if called with null — same contract as storeEnrichmentEvidence.
+ */
+export async function storeApolloOrgEnrichmentEvidence(
+  organizationId: string,
+  leadId:         string,
+  companyId:      string | null,
+  match:          import('../connectors/apollo/apollo.types.js').ApolloOrganizationMatch | null,
+): Promise<Evidence[]> {
+  if (!match) {
+    throw new Error(
+      `[evidence-store] storeApolloOrgEnrichmentEvidence called with null match ` +
+      `(lead=${leadId}, org=${organizationId}). ` +
+      `The null case (Apollo org endpoint returned {}) must be handled by the caller as enrichment_skipped. ` +
+      `Do not pass null here.`
+    )
+  }
+
+  const now       = new Date().toISOString()
+  const expiresAt = thirtyDaysFromNow()
+  const sourceId  = match.apolloOrgId
+
+  const facts: Array<{ fact_type: string; fact_value: unknown }> = []
+
+  // Firmographics — the primary fact for ICP scoring.
+  // Field names verified against real stripe.com response (2026-10-05).
+  facts.push({
+    fact_type: 'apollo_org_firmographics',
+    fact_value: {
+      apolloOrgId:    match.apolloOrgId,
+      name:           match.name,
+      domain:         match.domain,
+      industry:       match.industry,
+      industries:     match.industries,
+      employeeCount:  match.employeeCount,    // estimated_num_employees in raw
+      revenue:        match.revenue,           // organization_revenue in raw (verified)
+      revenuePrinted: match.revenuePrinted,
+      foundedYear:    match.foundedYear,
+      city:           match.location.city,     // top-level in raw, not nested under geo
+      state:          match.location.state,
+      country:        match.location.country,
+    },
+  })
+
+  // Funding — separate row for independent querying
+  if (match.fundingStage || match.totalFunding) {
+    facts.push({
+      fact_type: 'apollo_org_funding',
+      fact_value: {
+        totalFunding:    match.totalFunding,
+        fundingStage:    match.fundingStage,
+        apolloOrgId:     match.apolloOrgId,
+      },
+    })
+  }
+
+  // Tech stack — separate row (can be large; isolate for querying)
+  if (match.techStack.length > 0) {
+    facts.push({
+      fact_type: 'apollo_org_tech_stack',
+      fact_value: {
+        techStack:   match.techStack,
+        apolloOrgId: match.apolloOrgId,
+      },
+    })
+  }
+
+  // Identity row — always written, preserves full _raw for audit/replay
+  facts.push({
+    fact_type: 'apollo_org_identity',
+    fact_value: {
+      apolloOrgId: match.apolloOrgId,
+      _raw: match._raw,
+    },
+  })
+
+  const rows = facts.map(f => ({
+    organization_id: organizationId,
+    lead_id:         leadId,
+    company_id:      companyId,
+    source_type:     'apollo_enrichment' as const,
+    source_id:       sourceId,
+    data:            f,
+    is_current:      true,
+    collected_at:    now,
+    expires_at:      expiresAt,
+  }))
+
+  const { data, error } = await getDb()
+    .from('evidence')
+    .insert(rows)
+    .select()
+
+  if (error) throw new Error(`[evidence-store] storeApolloOrgEnrichmentEvidence DB write failed: ${error.message}`)
+
+  console.info(
+    `[evidence-store] Wrote ${(data ?? []).length} Apollo org evidence rows for lead ${leadId} ` +
+    `(apolloOrgId=${match.apolloOrgId}, domain=${match.domain}, ` +
+    `ids: ${(data ?? []).map((r: any) => r.id).join(', ')}).`
+  )
+
+  return (data ?? []) as Evidence[]
+}

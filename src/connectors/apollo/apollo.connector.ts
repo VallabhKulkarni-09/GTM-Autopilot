@@ -34,6 +34,9 @@ import type {
   ApolloPersonMatch,
   ApolloPeopleMatchResponse,
   ApolloRawPerson,
+  ApolloOrganizationMatch,
+  ApolloOrganizationEnrichResponse,
+  ApolloRawOrganization,
 } from './apollo.types.js'
 
 const APOLLO_BASE = 'https://api.apollo.io/api/v1'
@@ -75,19 +78,16 @@ export class ApolloConnector implements Connector<ApolloConfig> {
   async healthCheck(): Promise<ConnectorHealth> {
     const start = Date.now()
     try {
-      // Lightweight health check: send a known-bad email that will never match.
-      // A 200 response (even with match_confidence='none') proves the key is valid.
-      // A 401 means the key is wrong. A 429 means we're rate-limited (still "healthy" key).
-      const res = await this.rawMatch({ email: 'healthcheck-probe@apollo-connector-test.invalid' }, {})
-      // If we got here without throwing, the key works
-      const ok = res !== null || true   // null = no match, still means auth succeeded
+      // Use org endpoint for health check — people/match is out of scope on this plan.
+      // A no-match result (empty {}) on a nonsense domain still confirms auth works.
+      await this.rawOrganizationEnrich('health-check-probe-invalid.invalid')
       return { ok: true, latencyMs: Date.now() - start, lastChecked: new Date() }
     } catch (err: any) {
       return {
-        ok:         false,
-        latencyMs:  Date.now() - start,
+        ok:          false,
+        latencyMs:   Date.now() - start,
         lastChecked: new Date(),
-        error:      err?.message ?? String(err),
+        error:       err?.message ?? String(err),
       }
     }
   }
@@ -95,30 +95,51 @@ export class ApolloConnector implements Connector<ApolloConfig> {
   // ── Public Methods ──────────────────────────────────────────────────────────
 
   /**
-   * Enriches a person by email.
+   * Enriches a company by domain using GET /api/v1/organizations/enrich.
    *
-   * THREE-WAY OUTCOME (not two-way):
-   *   → throws ConnectorError     : API/network error (auth failure, 5xx, timeout)
-   *   → returns null              : HTTP 200 but match_confidence === 'none' (no Apollo record)
-   *   → returns ApolloPersonMatch : HTTP 200 with a real match (confidence high/medium/low)
+   * PLAN SCOPE: This endpoint is the ONLY enrichment endpoint available on
+   * the current Apollo plan. people/match is NOT authorized (403). Do not call it.
    *
-   * NEVER conflate the null return with an error. The caller must:
-   *   - On throw  → log enrichment_failed, capture error in snapshot
+   * THREE-WAY OUTCOME (non-negotiable):
+   *   → throws ConnectorError(AP_*)      : API/network error, auth failure, scope issue, rate limit
+   *   → returns null                     : HTTP 200, organization key absent in response body (no match)
+   *   → returns ApolloOrganizationMatch  : HTTP 200, organization present with real data
+   *
+   * No-match on Apollo org endpoint: HTTP 200 with body {} (empty object).
+   * NOT a 404. The caller must check for null explicitly — do not treat null as an error.
+   *
+   * CALLER CONTRACT:
+   *   - On throw  → log enrichment_failed, capture in snapshot
    *   - On null   → log enrichment_skipped with reason 'no_match'
    *   - On match  → store evidence, log enrichment_succeeded
    *
-   * match_confidence='low' is still a match — Apollo returned data, just with lower certainty.
-   * We store it and let the qualification agent use or discount it based on the score.
+   * The free-email-domain check (gmail.com etc.) happens BEFORE this call in enrich.ts
+   * so API credits are not wasted and the skip reason is explicit in the audit trail.
+   */
+  async enrichOrganizationByDomain(domain: string): Promise<ApolloOrganizationMatch | null> {
+    return withRetry(this.name, ApolloErrorCode.ENRICH_FAILED, async () => {
+      const raw = await this.rawOrganizationEnrich(domain)
+      if (!raw) return null
+      return this.mapToOrganizationMatch(raw)
+    })
+  }
+
+  /**
+   * @deprecated people/match is NOT authorized on the current Apollo plan (403).
+   * This method is retained for completeness but MUST NOT be called in production.
+   * It will throw AP_INSUFFICIENT_SCOPE immediately.
+   * If the plan is upgraded to include people data, remove this deprecation.
    */
   async enrichByEmail(
     email: string,
     options: ApolloEnrichOptions = {}
   ): Promise<ApolloPersonMatch | null> {
-    return withRetry(this.name, ApolloErrorCode.ENRICH_FAILED, async () => {
-      const raw = await this.rawMatch({ email }, options)
-      if (!raw) return null   // match_confidence === 'none'
-      return this.mapToPersonMatch(raw)
-    })
+    throw new ConnectorError(
+      this.name, ApolloErrorCode.INSUFFICIENT_SCOPE, 403, null,
+      'Apollo people/match is NOT authorized on this plan. ' +
+      'Only organizations/enrich is available. ' +
+      'Use enrichOrganizationByDomain() instead.'
+    )
   }
 
   // ── Private Helpers ─────────────────────────────────────────────────────────
@@ -245,6 +266,147 @@ export class ApolloConnector implements Connector<ApolloConfig> {
       )
     }
   }
+
+  // ── Private: Organization Enrichment ────────────────────────────────────────
+
+  /**
+   * Calls GET /api/v1/organizations/enrich?domain={domain}.
+   *
+   * Returns:
+   *   - null              : HTTP 200, body is {} — organization key absent (no match)
+   *   - ApolloRawOrganization : HTTP 200, organization key present with real data
+   *
+   * Throws ConnectorError for:
+   *   - 401 → AP_AUTH_FAILED       (bad key)
+   *   - 403 → AP_INSUFFICIENT_SCOPE (plan doesn't include this endpoint — handle loudly)
+   *   - 422 → AP_ENRICH_FAILED     (missing/invalid identifier — shouldn't happen since domain is always passed)
+   *   - 429 → AP_RATE_LIMITED      (allow caller to degrade gracefully)
+   *   - Network → AP_NETWORK_ERROR
+   *
+   * VERIFIED: Real Apollo API for stripe.com returns HTTP 200 with { organization: {...} }.
+   * VERIFIED: Real Apollo API for zzz-no-such-company-xyz123.invalid returns HTTP 200 with {}.
+   * VERIFIED: gmail.com also returns {} (Apollo itself doesn't return data for webmail).
+   */
+  private async rawOrganizationEnrich(domain: string): Promise<ApolloRawOrganization | null> {
+    this.assertConnected()
+
+    let res: Response
+    const url = `${APOLLO_BASE}/organizations/enrich?domain=${encodeURIComponent(domain)}`
+    try {
+      res = await fetch(url, {
+        method:  'GET',
+        headers: this.headers(),
+        signal:  AbortSignal.timeout(15_000),
+      })
+    } catch (err: any) {
+      throw new ConnectorError(
+        this.name, ApolloErrorCode.NETWORK_ERROR, 0, String(err),
+        `Apollo organizations/enrich network error for domain "${domain}": ${err?.message ?? String(err)}`
+      )
+    }
+
+    if (res.status === 401) {
+      const raw = await res.text()
+      throw new ConnectorError(
+        this.name, ApolloErrorCode.AUTH_FAILED, 401, raw,
+        `Apollo API authentication failed (401). Check APOLLO_API_KEY.`
+      )
+    }
+
+    if (res.status === 403) {
+      const raw = await res.text()
+      throw new ConnectorError(
+        this.name, ApolloErrorCode.INSUFFICIENT_SCOPE, 403, raw,
+        `Apollo organizations/enrich returned 403 Forbidden. ` +
+        `This endpoint requires a plan that includes organization enrichment. ` +
+        `Check Apollo plan or API key scope.`
+      )
+    }
+
+    if (res.status === 422) {
+      const raw = await res.text()
+      throw new ConnectorError(
+        this.name, ApolloErrorCode.ENRICH_FAILED, 422, raw,
+        `Apollo organizations/enrich returned 422 Unprocessable for domain "${domain}". ` +
+        `Raw: ${raw}`
+      )
+    }
+
+    if (res.status === 429) {
+      const raw = await res.text()
+      throw new ConnectorError(
+        this.name, ApolloErrorCode.RATE_LIMITED, 429, raw,
+        `Apollo API rate limit hit. Enrich call for domain "${domain}" will be retried by caller.`
+      )
+    }
+
+    if (!res.ok) {
+      const raw = await res.text()
+      throw new ConnectorError(
+        this.name, ApolloErrorCode.ENRICH_FAILED, res.status, raw,
+        `Apollo organizations/enrich failed with status ${res.status} for domain "${domain}"`
+      )
+    }
+
+    const data = await res.json() as ApolloOrganizationEnrichResponse
+
+    // No-match: Apollo returns HTTP 200 with body {} — organization key is absent.
+    // This is NOT a 404. Must check for absence explicitly, not rely on status code.
+    // Verified against real API: zzz-no-such-company.invalid → {} → organization is undefined.
+    if (!data || !data.organization) {
+      return null
+    }
+
+    return data.organization
+  }
+
+  /**
+   * Maps the raw Apollo organization response to ApolloOrganizationMatch.
+   * Field names verified against real stripe.com response (2026-10-05).
+   * Full _raw preserved for evidence audit.
+   */
+  private mapToOrganizationMatch(raw: ApolloRawOrganization): ApolloOrganizationMatch {
+    return {
+      apolloOrgId:    raw.id,
+      name:           raw.name           ?? null,
+      domain:         raw.primary_domain ?? null,
+      industry:       raw.industry       ?? null,
+      industries:     raw.industries     ?? [],
+      employeeCount:  raw.estimated_num_employees ?? null,
+      revenue:        raw.organization_revenue    ?? null,  // verified field name
+      revenuePrinted: raw.organization_revenue_printed ?? null,
+      totalFunding:   raw.total_funding  ?? null,
+      fundingStage:   raw.latest_funding_stage ?? null,
+      foundedYear:    raw.founded_year   ?? null,
+      location: {
+        city:    raw.city    ?? null,   // top-level, verified
+        state:   raw.state   ?? null,   // top-level, verified
+        country: raw.country ?? null,   // top-level, verified ("United States" not ISO code)
+      },
+      techStack: raw.technology_names ?? [],
+      _raw: raw,
+    }
+  }
+}
+
+// ── Exported Utilities ────────────────────────────────────────────────────────
+
+/**
+ * Derives an email domain for use with Apollo organizations/enrich.
+ *
+ * Returns null for:
+ *   - Emails with no @ character
+ *   - Domains with no dot (invalid TLD — these won't resolve)
+ *   - Empty/null emails
+ *
+ * The caller is responsible for checking against FREE_EMAIL_PROVIDERS before
+ * calling enrichOrganizationByDomain. This function only validates structure,
+ * not whether the domain is a free email provider.
+ */
+export function deriveDomainFromEmail(email: string): string | null {
+  const domain = email?.split('@')[1]?.toLowerCase().trim()
+  if (!domain || !domain.includes('.')) return null
+  return domain
 }
 
 // ── Factory ───────────────────────────────────────────────────────────────────

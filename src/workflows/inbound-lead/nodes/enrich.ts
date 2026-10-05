@@ -1,32 +1,42 @@
 /**
- * enrich.ts — Clearbit enrichment node.
+ * enrich.ts — Multi-source enrichment node.
  *
- * Three distinct outcomes, each with a distinct event_type:
+ * Sources (in order):
+ *   1. Clearbit (person + company) — if CLEARBIT_API_KEY is set
+ *   2. Apollo organizations/enrich (company only) — if APOLLO_API_KEY is set
  *
- *   enrichment_succeeded  — Clearbit returned data AND evidence rows were written to DB.
- *                           decision_snapshot built AFTER rows are stored → evidenceIds is non-empty.
+ * Apollo scope note: Only organizations/enrich is authorized on the current plan.
+ * people/match is out of scope (403). Apollo enrichment provides company-level data only:
+ * industry, employee count, revenue, funding, tech stack. No title/seniority signals.
+ * See rules.ts senior-title block and PROGRESS.md for the scoring impact.
  *
- *   enrichment_skipped    — Clearbit returned null (no match for this email).
- *                           Legitimate result, not a failure. No evidence rows written.
- *                           Logged so the audit trail is explicit: "checked, found nothing."
+ * Three distinct outcomes per source, each with a distinct event_type:
  *
- *   enrichment_failed     — API call threw (bad key, network error, unexpected response).
- *                           The error message is captured in decision_snapshot.
- *                           Qualification continues on whatever data is already in DB.
+ *   enrichment_succeeded  — data returned AND evidence rows written to DB.
+ *                           decision_snapshot built AFTER rows stored → evidenceIds non-empty.
  *
- * The pre-enrichment snapshot (for enrichment_requested) is built before the Clearbit
- * call. The post-enrichment snapshot (for enrichment_succeeded) is rebuilt AFTER rows are
- * stored so evidenceIds reflects the actual evidence written. This is the key invariant:
- * the snapshot on enrichment_succeeded must have a non-empty evidenceIds if any rows
- * were written.
+ *   enrichment_skipped    — no match found (legitimate), OR domain check failed
+ *                           (invalid email domain, free-email domain).
+ *                           Logged with explicit reason — never silently swallowed.
+ *
+ *   enrichment_failed     — API threw (bad key, network error, scope error).
+ *                           Error captured in snapshot. Qualification continues on
+ *                           whatever data already exists in DB.
+ *
+ * Domain derivation for Apollo: email → domain (email.split('@')[1]).
+ * Free-email-domain gate: checked against FREE_EMAIL_PROVIDERS from rules.ts before
+ * any Apollo API credit is spent. If domain is a webmail provider, log enrichment_skipped
+ * with reason 'free_email_domain', not a real company match.
  *
  * Silent null is NOT acceptable — every outcome is logged with a reason.
  */
 
 import { getDb } from '../../../db/client.js'
 import { WorkflowState } from '../state.js'
-import { storeEnrichmentEvidence } from '../../../evidence/evidence-store.js'
+import { storeEnrichmentEvidence, storeApolloOrgEnrichmentEvidence } from '../../../evidence/evidence-store.js'
 import { ClearbitConnector } from '../../../connectors/clearbit/clearbit.connector.js'
+import { ApolloConnector, deriveDomainFromEmail } from '../../../connectors/apollo/apollo.connector.js'
+import { FREE_EMAIL_PROVIDERS } from '../../../agents/qualification/rules.js'
 import { writeEvent } from '../../../events/event-log.js'
 import { buildDecisionSnapshot } from '../../../evidence/context-builder.js'
 
@@ -190,7 +200,7 @@ export async function enrich(state: WorkflowState): Promise<Partial<WorkflowStat
   })
 
   // Build Company-shaped state object from Clearbit data
-  const company = enrichResult.company
+  const clearbitCompany = enrichResult.company
     ? {
         id:              companyId ?? '',
         organization_id: state.organizationId,
@@ -213,7 +223,246 @@ export async function enrich(state: WorkflowState): Promise<Partial<WorkflowStat
       }
     : null
 
-  return { evidence: evidence as any[], company: company as any, currentStep: 'enrich' }
+  // ── Stage 2: Apollo organization enrichment ────────────────────────────────
+  // Runs regardless of Clearbit outcome — additive, not exclusive.
+  // Apollo provides company-level data only (org endpoint). No person-level signals.
+  const apolloResult = await enrichWithApollo(state, companyId)
+
+  const finalCompany = apolloResult.company ?? clearbitCompany
+  const finalEvidence = [...evidence as any[], ...(apolloResult.evidence ?? [])]
+
+  return {
+    evidence:    finalEvidence,
+    company:     finalCompany as any,
+    currentStep: 'enrich',
+  }
+}
+
+// ── Stage 2: Apollo organization enrichment ───────────────────────────────────
+// Extracted as a helper so the main enrich() function stays readable.
+// Returns { evidence: Evidence[], company: Company | null }.
+// Errors are caught and logged — never propagated to crash the workflow.
+
+async function enrichWithApollo(
+  state: WorkflowState,
+  existingCompanyId: string | null,
+): Promise<{ evidence: any[]; company: any | null }> {
+  const apiKey = process.env.APOLLO_API_KEY
+  if (!apiKey) {
+    // Apollo not configured — skip silently (no event logged for "not configured",
+    // only for "tried and found nothing"). This is consistent with Clearbit behaviour.
+    return { evidence: [], company: null }
+  }
+
+  // ── Domain derivation ────────────────────────────────────────────────────────
+  // Apollo org endpoint takes a domain, not an email.
+  // Derive from lead email. Explicit reason logged for every skip.
+  const domain = deriveDomainFromEmail(state.lead.email)
+
+  if (!domain) {
+    console.warn(
+      `[enrich/apollo] Cannot derive domain from email "${state.lead.email}". ` +
+      `Logging enrichment_skipped with reason invalid_email_domain.`
+    )
+    await writeEvent({
+      organizationId:   state.organizationId,
+      workflowRunId:    state.workflowRunId,
+      playInstanceId:   state.playInstanceId,
+      leadId:           state.leadId,
+      eventType:        'enrichment_skipped',
+      actorType:        'system',
+      decisionSnapshot: await buildDecisionSnapshot(state as any) as any,
+      eventStatus:      'skipped',
+      errorMessage:     `Apollo org enrichment skipped: invalid email domain for "${state.lead.email}"`,
+    })
+    return { evidence: [], company: null }
+  }
+
+  // ── Free-email-domain gate ───────────────────────────────────────────────────
+  // Reuses FREE_EMAIL_PROVIDERS from rules.ts — not duplicated.
+  // Gmail.com returns {} from Apollo anyway, but this gate:
+  //   1. Saves API credits before any network call
+  //   2. Makes the skip reason explicit in the audit trail
+  if (FREE_EMAIL_PROVIDERS.has(domain)) {
+    console.info(
+      `[enrich/apollo] Domain "${domain}" is a free-email provider. ` +
+      `Skipping Apollo org enrichment to avoid false match (e.g., Google LLC for gmail.com). ` +
+      `Logging enrichment_skipped with reason free_email_domain.`
+    )
+    await writeEvent({
+      organizationId:   state.organizationId,
+      workflowRunId:    state.workflowRunId,
+      playInstanceId:   state.playInstanceId,
+      leadId:           state.leadId,
+      eventType:        'enrichment_skipped',
+      actorType:        'system',
+      decisionSnapshot: await buildDecisionSnapshot(state as any) as any,
+      eventStatus:      'skipped',
+      errorMessage:     `Apollo org enrichment skipped: "${domain}" is a free-email provider domain`,
+    })
+    return { evidence: [], company: null }
+  }
+
+  // ── Apollo API call ──────────────────────────────────────────────────────────
+  const apollo = new ApolloConnector()
+  await apollo.connect({ apiKey })
+
+  let apolloResult: Awaited<ReturnType<ApolloConnector['enrichOrganizationByDomain']>> = null
+  let apolloError: Error | null = null
+
+  try {
+    apolloResult = await apollo.enrichOrganizationByDomain(domain)
+  } catch (e: any) {
+    apolloError = e
+  }
+
+  // ── Error path ───────────────────────────────────────────────────────────────
+  if (apolloError) {
+    console.warn(
+      `[enrich/apollo] Apollo org enrichment failed for domain "${domain}": ${apolloError.message}. ` +
+      `Continuing with Clearbit data only.`
+    )
+    await writeEvent({
+      organizationId:   state.organizationId,
+      workflowRunId:    state.workflowRunId,
+      playInstanceId:   state.playInstanceId,
+      leadId:           state.leadId,
+      eventType:        'enrichment_failed',
+      actorType:        'system',
+      decisionSnapshot: {
+        ...(await buildDecisionSnapshot(state as any)) as any,
+        enrichmentError:  apolloError.message,
+        enrichmentSource: 'apollo_org',
+        enrichmentDomain: domain,
+      } as any,
+      eventStatus:  'failed',
+      errorMessage: apolloError.message,
+    })
+    return { evidence: [], company: null }
+  }
+
+  // ── No-match path ────────────────────────────────────────────────────────────
+  // Apollo returns {} (empty body) for unknown domains. Null from enrichOrganizationByDomain.
+  if (!apolloResult) {
+    console.info(
+      `[enrich/apollo] Apollo org enrichment returned no match for domain "${domain}". ` +
+      `This is legitimate — domain not in Apollo database. Logging enrichment_skipped.`
+    )
+    await writeEvent({
+      organizationId:   state.organizationId,
+      workflowRunId:    state.workflowRunId,
+      playInstanceId:   state.playInstanceId,
+      leadId:           state.leadId,
+      eventType:        'enrichment_skipped',
+      actorType:        'system',
+      decisionSnapshot: {
+        ...(await buildDecisionSnapshot(state as any)) as any,
+        enrichmentSource:     'apollo_org',
+        enrichmentSkipReason: 'no_match',
+        enrichmentSkipDetail: `Apollo org endpoint returned no data for domain: ${domain}`,
+      } as any,
+      eventStatus: 'skipped',
+    })
+    return { evidence: [], company: null }
+  }
+
+  // ── Success path ─────────────────────────────────────────────────────────────
+  const db = getDb()
+  let apolloCompanyId = existingCompanyId  // reuse Clearbit's company row if already created
+
+  // Upsert company record from Apollo data if not already created by Clearbit.
+  // Use primary_domain as the dedup key, same as Clearbit.
+  if (!apolloCompanyId && apolloResult.domain) {
+    const { data: companyRow } = await db
+      .from('companies')
+      .upsert({
+        organization_id: state.organizationId,
+        name:            apolloResult.name       ?? null,
+        domain:          apolloResult.domain      ?? null,
+        industry:        apolloResult.industry    ?? null,
+        employee_count:  apolloResult.employeeCount ?? null,
+        annual_revenue:  apolloResult.revenue     ?? null,  // organization_revenue from Apollo
+        country:         apolloResult.location.country ?? null,
+        state:           apolloResult.location.state   ?? null,
+        city:            apolloResult.location.city    ?? null,
+        founded_year:    apolloResult.foundedYear ?? null,
+        funding_stage:   apolloResult.fundingStage ?? null,
+      }, { onConflict: 'organization_id,domain', ignoreDuplicates: false })
+      .select('id')
+      .single()
+    apolloCompanyId = (companyRow as any)?.id ?? null
+
+    if (apolloCompanyId) {
+      await db.from('leads')
+        .update({ company_id: apolloCompanyId })
+        .eq('id', state.leadId)
+        .eq('organization_id', state.organizationId)
+    }
+  }
+
+  const apolloEvidence = await storeApolloOrgEnrichmentEvidence(
+    state.organizationId,
+    state.leadId,
+    apolloCompanyId,
+    apolloResult,
+  )
+
+  console.info(
+    `[enrich/apollo] Apollo org enrichment complete for domain "${domain}": ` +
+    `stored ${apolloEvidence.length} evidence rows ` +
+    `(ids: ${apolloEvidence.map((e: any) => e.id).join(', ') || 'none'}).`
+  )
+
+  // Rebuild snapshot AFTER Apollo rows are stored — so evidenceIds includes them.
+  const postApolloSnapshot = await buildDecisionSnapshot(state as any)
+
+  if (apolloEvidence.length > 0 && postApolloSnapshot.evidenceIds.length === 0) {
+    console.error(
+      `[enrich/apollo] BUG: ${apolloEvidence.length} Apollo evidence rows written but ` +
+      `postApolloSnapshot.evidenceIds is still empty. ` +
+      `Lead ${state.leadId}, domain ${domain}. Check evidence table RLS and context-builder query.`
+    )
+  }
+
+  await writeEvent({
+    organizationId:   state.organizationId,
+    workflowRunId:    state.workflowRunId,
+    playInstanceId:   state.playInstanceId,
+    leadId:           state.leadId,
+    eventType:        'enrichment_succeeded',
+    actorType:        'system',
+    decisionSnapshot: {
+      ...postApolloSnapshot,
+      enrichmentSource:      'apollo_org',
+      enrichmentDomain:      domain,
+      enrichmentRowsWritten: apolloEvidence.length,
+    } as any,
+    eventStatus: 'success',
+  })
+
+  // Build a Company-shaped object from Apollo data for the workflow state.
+  const apolloCompany = {
+    id:              apolloCompanyId ?? '',
+    organization_id: state.organizationId,
+    name:            apolloResult.name ?? null,
+    domain:          apolloResult.domain ?? null,
+    industry:        apolloResult.industry ?? null,
+    sub_industry:    null,
+    employee_count:  apolloResult.employeeCount ?? null,
+    employee_range:  null,
+    annual_revenue:  apolloResult.revenue ?? null,
+    country:         apolloResult.location.country ?? null,
+    state:           apolloResult.location.state ?? null,
+    city:            apolloResult.location.city ?? null,
+    founded_year:    apolloResult.foundedYear ?? null,
+    tech_stack:      apolloResult.techStack.length > 0 ? apolloResult.techStack : null,
+    funding_stage:   apolloResult.fundingStage ?? null,
+    raw_clearbit:    null,
+    created_at:      new Date().toISOString(),
+    updated_at:      new Date().toISOString(),
+  }
+
+  return { evidence: apolloEvidence as any[], company: apolloCompany }
 }
 
 // ── Helper: load company from DB if lead already has company_id ───────────────

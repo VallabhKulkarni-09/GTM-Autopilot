@@ -25,6 +25,17 @@ const ICP_REGIONS = ['US', 'CA', 'GB', 'DE', 'AU', 'NL']
 const SENIOR_TITLE_KEYWORDS = ['vp', 'vice president', 'director', 'head', 'chief', 'cto', 'ceo', 'coo', 'cfo', 'founder']
 const HIGH_INTENT_KEYWORDS = ['demo', 'trial']
 
+/**
+ * Exported for reuse in enrich.ts (Apollo org enrichment domain gate).
+ * Do not duplicate this list — import from here.
+ */
+export const FREE_EMAIL_PROVIDERS = new Set([
+  'gmail.com', 'yahoo.com', 'hotmail.com', 'outlook.com', 'icloud.com',
+  'aol.com', 'protonmail.com', 'proton.me', 'mail.com', 'zoho.com',
+  'yandex.com', 'yandex.ru', 'tutanota.com', 'fastmail.com',
+  'inbox.com', 'live.com', 'msn.com', 'me.com', 'mac.com',
+])
+
 function normalise(s: string | null | undefined): string {
   return (s ?? '').toLowerCase().trim()
 }
@@ -35,13 +46,7 @@ function matchesAny(haystack: string, needles: string[]): boolean {
 
 export function scoreIcp(lead: Lead, company: Company | null): QualificationParameters {
   // ── Hard gate: free/disposable email providers ─────────────────────────────
-  const FREE_EMAIL_PROVIDERS = new Set([
-    'gmail.com', 'yahoo.com', 'hotmail.com', 'outlook.com', 'icloud.com',
-    'aol.com', 'protonmail.com', 'proton.me', 'mail.com', 'zoho.com',
-    'yandex.com', 'yandex.ru', 'tutanota.com', 'fastmail.com',
-    'inbox.com', 'live.com', 'msn.com', 'me.com', 'mac.com',
-  ])
-
+  // Uses the module-level FREE_EMAIL_PROVIDERS export (also used by enrich.ts for Apollo).
   const emailDomain = lead.email?.split('@')[1]?.toLowerCase().trim()
   if (emailDomain && FREE_EMAIL_PROVIDERS.has(emailDomain)) {
     return {
@@ -116,6 +121,12 @@ export function scoreIcp(lead: Lead, company: Company | null): QualificationPara
   }
 
   // ── Senior title ────────────────────────────────────────────────────────────
+  // NOTE: lead.title comes from the HubSpot form submission (what the lead typed), NOT from
+  // enrichment. The current Apollo plan provides organization/company data only — no person-level
+  // enrichment (title, seniority, role) is available from this source.
+  // If the form doesn't capture title, this signal will be absent for most leads.
+  // ICP scoring is therefore primarily driven by company signals (size, industry, region).
+  // See PROGRESS.md: "Title/seniority-based scoring — Apollo plan scope limitation".
   const title = normalise(lead.title)
   if (title && matchesAny(title, SENIOR_TITLE_KEYWORDS)) {
     score += 10

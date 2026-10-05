@@ -167,3 +167,89 @@ export type ApolloPersonMatch = {
   // Raw response preserved for evidence storage and debugging
   _raw: ApolloRawPerson
 }
+
+// ── Organization Enrichment ────────────────────────────────────────────────────
+// Source: GET /api/v1/organizations/enrich?domain={domain}
+//
+// VERIFIED against real Apollo API response for stripe.com (2026-10-05).
+// Key structural facts (NOT from docs — from the actual JSON):
+//
+//  - No-match: HTTP 200, body is {} (empty object — organization key is ABSENT)
+//    NOT a 404. Callers must check `!response.organization` explicitly.
+//  - Match:    HTTP 200, body is { organization: { ...fields } }
+//  - Revenue:  `organization_revenue` (NOT `annual_revenue` — the docs use different names)
+//    Both exist in the response and are equal; we use organization_revenue as the canonical one.
+//  - Country/city/state: top-level on org (NOT nested under geo like Clearbit)
+//  - Industry: `industry` (string, lowercase, e.g. "information technology & services")
+//  - Multiple industries: `industries` (string array, first = primary)
+//  - Employees: `estimated_num_employees` (integer)
+//  - Funding stage: `latest_funding_stage` (string, e.g. "Venture (Round not Specified)")
+//  - gmail.com: Apollo returns {} for webmail domains (no organization). Blocklist is still
+//    the right gate — it avoids burning API credits and makes the skip reason explicit.
+
+export type ApolloRawOrganization = {
+  id:                       string
+  name:                     string | null
+  website_url:              string | null
+  linkedin_url:             string | null
+  twitter_url:              string | null
+  facebook_url:             string | null
+  primary_domain:           string | null
+  industry:                 string | null        // primary industry, lowercase
+  industries:               string[]             // all industries including primary
+  keywords:                 string[]
+  estimated_num_employees:  number | null        // VERIFIED: integer (e.g. 9400 for Stripe)
+  organization_revenue:     number | null        // VERIFIED: float USD (e.g. 6935000000.0 for Stripe)
+  organization_revenue_printed: string | null    // e.g. "6.9B"
+  annual_revenue:           number | null        // same value as organization_revenue
+  annual_revenue_printed:   string | null
+  total_funding:            number | null
+  total_funding_printed:    string | null
+  latest_funding_stage:     string | null        // e.g. "Venture (Round not Specified)"
+  latest_funding_round_date: string | null
+  founded_year:             number | null
+  city:                     string | null        // top-level, NOT nested under geo
+  state:                    string | null        // top-level, e.g. "California"
+  country:                  string | null        // top-level, e.g. "United States"
+  raw_address:              string | null
+  short_description:        string | null
+  alexa_ranking:            number | null
+  phone:                    string | null
+  sic_codes:                string[]
+  naics_codes:              string[]
+  suborganizations:         Array<{ id: string; name: string; website_url?: string }> | null
+  num_suborganizations:     number | null
+  owned_by_organization_id: string | null
+  departmental_head_count:  Record<string, number> | null
+  org_chart_sector:         string | null
+  current_technologies:     Array<{ uid: string; name: string; category: string }> | null
+  technology_names:         string[]
+}
+
+export type ApolloOrganizationEnrichResponse = {
+  organization: ApolloRawOrganization | null
+}
+
+// ── Mapped result returned by enrichOrganizationByDomain ─────────────────────
+// A structured subset. Full raw response is preserved in _raw for evidence audit.
+
+export type ApolloOrganizationMatch = {
+  apolloOrgId:   string
+  name:          string | null
+  domain:        string | null           // primary_domain from response
+  industry:      string | null           // primary industry
+  industries:    string[]
+  employeeCount: number | null           // estimated_num_employees
+  revenue:       number | null           // organization_revenue (USD)
+  revenuePrinted: string | null          // organization_revenue_printed
+  totalFunding:  number | null
+  fundingStage:  string | null           // latest_funding_stage
+  foundedYear:   number | null
+  location: {
+    city:    string | null
+    state:   string | null
+    country: string | null              // "United States", not ISO code
+  }
+  techStack:     string[]               // technology_names
+  _raw:          ApolloRawOrganization
+}
