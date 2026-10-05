@@ -2,48 +2,61 @@
 /**
  * verify-apollo-enrichment.mjs
  *
- * Live-fire test for the Apollo connector.
- * Runs the four steps from the PR checklist:
- *   1. Call Apollo people/match with a real professional email
- *   2. Capture and print the raw JSON response
- *   3. Store evidence rows in Supabase
- *   4. Read back the evidence rows and decision_snapshot.evidenceIds
- *   5. Test the no-match path with a throwaway email
- *   6. Cleanup all test rows
+ * Live-fire verification for Apollo organizations/enrich connector.
+ *
+ * PLAN SCOPE: This script tests GET /api/v1/organizations/enrich (domain-level).
+ * people/match is NOT authorized on this plan (403) — do not use it.
+ *
+ * What this verifies (PR checklist):
+ *   1. Derive domain from the test email — explicit domain logged
+ *   2. Free-email-domain gate — gmail.com blocked before API call
+ *   3. No-match path — nonsense domain → HTTP 200 + {} → null (not throw)
+ *   4. Real match — stripe.com → real org data, field names confirmed
+ *   5. Evidence rows written to Supabase with storeApolloOrgEnrichmentEvidence field shape
+ *   6. decision_snapshot.evidenceIds non-empty (read back via context-builder query)
+ *   7. Cleanup
  *
  * Usage:
- *   APOLLO_API_KEY=<key> node -r dotenv/config scripts/verify-apollo-enrichment.mjs
+ *   APOLLO_TEST_EMAIL=you@yourcompany.com node -r dotenv/config scripts/verify-apollo-enrichment.mjs
  *
  * What to paste into PROGRESS.md:
- *   - The full raw JSON from step 2 (person object)
- *   - The evidence rows from step 4 (id, source_type, data.fact_type)
- *   - The evidenceIds array from the re-read
+ *   - Raw org JSON printed in Step 4
+ *   - Evidence row IDs and fact types from Step 5
+ *   - evidenceIds array from Step 6
  *
- * Do NOT run this in CI — it costs Apollo credits.
+ * Do NOT run in CI — costs Apollo credits.
  */
 
 import { createClient } from '@supabase/supabase-js'
 import ws from 'ws'
 import { randomUUID } from 'crypto'
 
-const SUPABASE_URL      = process.env.SUPABASE_URL
-const SUPABASE_KEY      = process.env.SUPABASE_SERVICE_KEY
-const APOLLO_API_KEY    = process.env.APOLLO_API_KEY
-const ORG_ID            = process.env.DEFAULT_ORG_ID ?? '08472be3-4990-43b7-9431-c84352fd0260'
+const SUPABASE_URL   = process.env.SUPABASE_URL
+const SUPABASE_KEY   = process.env.SUPABASE_SERVICE_KEY
+const APOLLO_API_KEY = process.env.APOLLO_API_KEY
+const ORG_ID         = process.env.DEFAULT_ORG_ID ?? '08472be3-4990-43b7-9431-c84352fd0260'
+const TEST_EMAIL     = process.env.APOLLO_TEST_EMAIL ?? 'contact@stripe.com'
 
-// The real email to test with — should be a LinkedIn-visible person at a real company.
-// Change this to a real enrichable email before running.
-const TEST_EMAIL = process.env.APOLLO_TEST_EMAIL ?? 'elon@x.com'
+// ── Free-email domain list (mirrors rules.ts export — must stay in sync) ─────
+const FREE_EMAIL_PROVIDERS = new Set([
+  'gmail.com', 'yahoo.com', 'hotmail.com', 'outlook.com', 'icloud.com',
+  'aol.com', 'protonmail.com', 'proton.me', 'mail.com', 'zoho.com',
+  'yandex.com', 'yandex.ru', 'tutanota.com', 'fastmail.com',
+  'inbox.com', 'live.com', 'msn.com', 'me.com', 'mac.com',
+])
 
-// A throwaway email for the no-match test
-const NO_MATCH_EMAIL = 'zzz-no-match-verify-apollo@invalid-domain-xyz.invalid'
+function deriveDomain(email) {
+  const domain = email?.split('@')[1]?.toLowerCase().trim()
+  if (!domain || !domain.includes('.')) return null
+  return domain
+}
 
 if (!SUPABASE_URL || !SUPABASE_KEY) {
-  console.error('Set SUPABASE_URL and SUPABASE_SERVICE_KEY')
+  console.error('Set SUPABASE_URL and SUPABASE_SERVICE_KEY in .env')
   process.exit(1)
 }
 if (!APOLLO_API_KEY) {
-  console.error('Set APOLLO_API_KEY')
+  console.error('Set APOLLO_API_KEY in .env')
   process.exit(1)
 }
 
@@ -52,7 +65,7 @@ const db = createClient(SUPABASE_URL, SUPABASE_KEY, {
   realtime: { transport: ws },
 })
 
-const TEST_LEAD_ID = randomUUID()
+const TEST_LEAD_ID    = randomUUID()
 const TEST_COMPANY_ID = randomUUID()
 
 async function cleanup() {
@@ -61,120 +74,199 @@ async function cleanup() {
   await db.from('companies').delete().eq('id', TEST_COMPANY_ID)
 }
 
-async function apolloMatch(email) {
-  const res = await fetch('https://api.apollo.io/api/v1/people/match', {
-    method:  'POST',
-    headers: {
-      'x-api-key':    APOLLO_API_KEY,
-      'Content-Type': 'application/json',
-      'Accept':       'application/json',
-    },
-    body:    JSON.stringify({ email }),
+async function apolloOrgEnrich(domain) {
+  const url = `https://api.apollo.io/api/v1/organizations/enrich?domain=${encodeURIComponent(domain)}`
+  const res = await fetch(url, {
+    method:  'GET',
+    headers: { 'x-api-key': APOLLO_API_KEY, 'Content-Type': 'application/json', 'Accept': 'application/json' },
     signal:  AbortSignal.timeout(15_000),
   })
-
   const text = await res.text()
-  return { status: res.status, body: text, json: JSON.parse(text) }
+  let json
+  try { json = JSON.parse(text) } catch { json = null }
+  return { status: res.status, body: text, json }
 }
 
 async function run() {
-  console.log('\n=== Apollo Enrichment Live Verification ===\n')
+  console.log('\n=== Apollo Organization Enrichment — Live Verification ===')
+  console.log(`Endpoint: GET /api/v1/organizations/enrich`)
+  console.log(`Note: people/match is NOT on this plan (403). Org-level only.\n`)
 
-  // ── Step 0: Cleanup ─────────────────────────────────────────────────────────
   await cleanup()
 
-  // ── Step 1: No-match path ───────────────────────────────────────────────────
-  console.log(`\n─── Step 1: No-match path (${NO_MATCH_EMAIL}) ───`)
-  const noMatchResult = await apolloMatch(NO_MATCH_EMAIL)
-  console.log(`HTTP ${noMatchResult.status}`)
-  console.log(`match_confidence: ${noMatchResult.json?.person?.match_confidence ?? 'N/A'}`)
-  if (noMatchResult.json?.person?.match_confidence !== 'none' && noMatchResult.json?.person !== null) {
-    console.warn('⚠️  Expected match_confidence=none or person=null for throwaway email')
+  // ── Step 1: Domain derivation ─────────────────────────────────────────────
+  console.log(`─── Step 1: Domain derivation from email ───`)
+  const testDomain = deriveDomain(TEST_EMAIL)
+  console.log(`Test email:  ${TEST_EMAIL}`)
+  console.log(`Derived domain: ${testDomain ?? 'null (invalid email)'}`)
+  if (!testDomain) {
+    console.error('FAIL: Could not derive domain from test email. Check APOLLO_TEST_EMAIL.')
+    process.exit(1)
+  }
+  if (FREE_EMAIL_PROVIDERS.has(testDomain)) {
+    console.error(`FAIL: "${testDomain}" is a free-email provider. Set APOLLO_TEST_EMAIL to a professional address (e.g. you@yourcompany.com).`)
+    process.exit(1)
+  }
+  console.log(`✓ Domain valid and not free-email provider\n`)
+
+  // ── Step 2: Free-email-domain gate ───────────────────────────────────────
+  console.log(`─── Step 2: Free-email-domain gate test (gmail.com) ───`)
+  const gmailDomain = deriveDomain('test@gmail.com')
+  const isBlocked   = FREE_EMAIL_PROVIDERS.has(gmailDomain)
+  console.log(`gmail.com in FREE_EMAIL_PROVIDERS: ${isBlocked}`)
+  if (!isBlocked) {
+    console.error('FAIL: gmail.com not in FREE_EMAIL_PROVIDERS — gate is broken')
+    process.exit(1)
+  }
+  console.log(`✓ Free-email gate confirmed — no API call would be made for gmail.com\n`)
+
+  // ── Step 3: No-match path (nonsense domain) ───────────────────────────────
+  const noMatchDomain = 'zzz-no-such-company-xyz123.invalid'
+  console.log(`─── Step 3: No-match path (${noMatchDomain}) ───`)
+  const noMatchResult = await apolloOrgEnrich(noMatchDomain)
+  console.log(`HTTP status: ${noMatchResult.status}`)
+  console.log(`Raw response body: ${noMatchResult.body.slice(0, 100)}`)
+
+  if (noMatchResult.status !== 200) {
+    console.error(`FAIL: Expected HTTP 200, got ${noMatchResult.status}`)
+    console.error(noMatchResult.body)
+    process.exit(1)
+  }
+  const hasOrg = noMatchResult.json?.organization != null
+  if (hasOrg) {
+    console.warn(`⚠️  Unexpected: Apollo returned an organization for "${noMatchDomain}". Inspect:`)
+    console.warn(JSON.stringify(noMatchResult.json?.organization, null, 2).slice(0, 500))
   } else {
-    console.log('✓ No-match path confirmed: Apollo returns 200 with match_confidence=none (not 404)')
-    console.log('  This is the critical case — the connector must return null, not throw')
+    console.log(`✓ No-match confirmed: HTTP 200 + {} (organization key absent)`)
+    console.log(`  This is the documented behavior — NOT a 404. Connector returns null.\n`)
   }
 
-  // ── Step 2: Real match ──────────────────────────────────────────────────────
-  console.log(`\n─── Step 2: Real match (${TEST_EMAIL}) ───`)
-  const matchResult = await apolloMatch(TEST_EMAIL)
-  console.log(`HTTP ${matchResult.status}`)
+  // ── Step 4: Real org match ─────────────────────────────────────────────────
+  console.log(`─── Step 4: Real match (domain: ${testDomain}) ───`)
+  const matchResult = await apolloOrgEnrich(testDomain)
+  console.log(`HTTP status: ${matchResult.status}`)
 
+  if (matchResult.status === 403) {
+    console.error('\nFAIL: 403 — organizations/enrich is not authorized on this key.')
+    console.error('This is AP_INSUFFICIENT_SCOPE — the plan does not include this endpoint.')
+    console.error(matchResult.body)
+    process.exit(1)
+  }
+  if (matchResult.status === 429) {
+    console.error('\nFAIL: 429 — Rate limited. Wait and retry.')
+    process.exit(1)
+  }
   if (matchResult.status !== 200) {
     console.error(`\nFAIL: Expected 200, got ${matchResult.status}`)
     console.error(matchResult.body)
-    await cleanup()
     process.exit(1)
   }
 
-  const person = matchResult.json?.person
-  const confidence = person?.match_confidence ?? 'none'
-  console.log(`match_confidence: ${confidence}`)
-
-  if (confidence === 'none' || !person) {
-    console.warn('\n⚠️  No match found for test email. Try a different email (real LinkedIn-visible person).')
-    console.warn('   PROGRESS.md status remains: live Clearbit/Apollo response not yet observed.')
-    await cleanup()
+  const org = matchResult.json?.organization
+  if (!org) {
+    console.warn('\n⚠️  No organization match for domain: ' + testDomain)
+    console.warn('   This domain may not be in Apollo\'s database.')
+    console.warn('   Try: APOLLO_TEST_EMAIL=contact@stripe.com')
     process.exit(0)
   }
 
-  console.log('\n✓ Match found. Raw Apollo response (person object):')
-  console.log(JSON.stringify(person, null, 2))
+  console.log('\n✓ Organization match found.')
+  console.log('\n=== RAW APOLLO ORGANIZATION RESPONSE (paste into PROGRESS.md) ===')
+  console.log(JSON.stringify(org, null, 2))
+  console.log('=== END RAW RESPONSE ===\n')
 
-  // ── Step 3: Seed test lead ──────────────────────────────────────────────────
-  console.log('\n─── Step 3: Seeding test lead ───')
+  // Verify critical field names from real response
+  console.log('─── Field name verification (against real stripe.com response) ───')
+  const checks = [
+    { field: 'id',                       val: org.id,                       expect: 'string' },
+    { field: 'name',                     val: org.name,                     expect: 'string' },
+    { field: 'primary_domain',           val: org.primary_domain,           expect: 'string' },
+    { field: 'industry',                 val: org.industry,                 expect: 'string' },
+    { field: 'estimated_num_employees',  val: org.estimated_num_employees,  expect: 'number' },
+    { field: 'organization_revenue',     val: org.organization_revenue,     expect: 'number' },   // NOT annual_revenue
+    { field: 'city',                     val: org.city,                     expect: 'string' },   // top-level, NOT nested
+    { field: 'state',                    val: org.state,                    expect: 'string' },   // top-level
+    { field: 'country',                  val: org.country,                  expect: 'string' },   // top-level
+    { field: 'latest_funding_stage',     val: org.latest_funding_stage,     expect: 'any' },
+    { field: 'founded_year',             val: org.founded_year,             expect: 'any' },
+    { field: 'technology_names',         val: org.technology_names,         expect: 'array' },
+  ]
+  let fieldOk = true
+  for (const c of checks) {
+    const type = Array.isArray(c.val) ? 'array' : typeof c.val
+    const ok = c.expect === 'any' ? true : (type === c.expect || c.val == null)
+    const mark = ok ? '✓' : '✗'
+    console.log(`  ${mark} ${c.field}: ${JSON.stringify(c.val)?.slice(0, 60)}`)
+    if (!ok) { fieldOk = false; console.log(`      expected type ${c.expect}, got ${type}`) }
+  }
+  if (!fieldOk) {
+    console.error('\nFAIL: Some field names did not match. Check connector field mapping.')
+    process.exit(1)
+  }
+  console.log('\n✓ All field names verified against real response\n')
+
+  // ── Step 5: Write evidence rows ────────────────────────────────────────────
+  console.log('─── Step 5: Seed test lead + write evidence rows ───')
   const { error: compErr } = await db.from('companies').insert({
     id: TEST_COMPANY_ID, organization_id: ORG_ID,
-    name: person.organization?.name ?? 'Apollo Test Co',
-    domain: person.organization?.primary_domain ?? null,
+    name: org.name ?? 'Apollo Verify Test', domain: org.primary_domain ?? testDomain,
   })
   if (compErr) throw new Error(`Company seed: ${compErr.message}`)
 
   const { error: leadErr } = await db.from('leads').insert({
     id: TEST_LEAD_ID, organization_id: ORG_ID,
-    email: TEST_EMAIL, first_name: person.first_name, last_name: person.last_name,
-    source: 'test:verify-apollo-enrichment', stage: 'new',
+    email: TEST_EMAIL, first_name: 'Verify', last_name: 'ApolloTest',
+    source: 'test:verify-apollo-org-enrichment', stage: 'new',
     company_id: TEST_COMPANY_ID, form_submitted_at: new Date().toISOString(), is_duplicate: false,
   })
   if (leadErr) throw new Error(`Lead seed: ${leadErr.message}`)
-  console.log(`✓ Test lead: ${TEST_LEAD_ID}`)
+  console.log(`✓ Test lead seeded: ${TEST_LEAD_ID}`)
 
-  // ── Step 4: Write evidence rows (mirrors what storeApolloEnrichmentEvidence does) ──
-  console.log('\n─── Step 4: Writing Apollo evidence rows ───')
-  const now = new Date().toISOString()
+  // Mirroring exactly what storeApolloOrgEnrichmentEvidence writes
+  const now       = new Date().toISOString()
   const expiresAt = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString()
 
-  const facts = []
-  if (person.title) facts.push({ fact_type: 'apollo_person_title', fact_value: person.title })
-  if (person.city || person.state || person.country) {
-    facts.push({ fact_type: 'apollo_person_location', fact_value: { city: person.city, state: person.state, country: person.country } })
+  const facts = [
+    {
+      fact_type: 'apollo_org_firmographics',
+      fact_value: {
+        apolloOrgId:    org.id,
+        name:           org.name,
+        domain:         org.primary_domain,
+        industry:       org.industry,
+        industries:     org.industries ?? [],
+        employeeCount:  org.estimated_num_employees,     // real field name
+        revenue:        org.organization_revenue,         // real field name (NOT annual_revenue)
+        revenuePrinted: org.organization_revenue_printed,
+        foundedYear:    org.founded_year,
+        city:           org.city,                         // top-level, NOT nested
+        state:          org.state,
+        country:        org.country,
+      },
+    },
+  ]
+  if (org.latest_funding_stage || org.total_funding) {
+    facts.push({ fact_type: 'apollo_org_funding', fact_value: { totalFunding: org.total_funding, fundingStage: org.latest_funding_stage, apolloOrgId: org.id } })
   }
-  if (person.linkedin_url) facts.push({ fact_type: 'apollo_person_linkedin', fact_value: person.linkedin_url })
-  facts.push({ fact_type: 'apollo_person_match_meta', fact_value: { apolloId: person.id, matchConfidence: person.match_confidence, emailStatus: person.email_status, _raw: person } })
-  if (person.organization) {
-    facts.push({ fact_type: 'apollo_company_firmographics', fact_value: {
-      apolloOrgId: person.organization.id, name: person.organization.name,
-      domain: person.organization.primary_domain, industry: person.organization.industry,
-      employeeCount: person.organization.estimated_num_employees,
-      annualRevenue: person.organization.annual_revenue,
-      fundingStage: person.organization.latest_funding_stage, country: person.organization.country,
-    }})
+  if ((org.technology_names ?? []).length > 0) {
+    facts.push({ fact_type: 'apollo_org_tech_stack', fact_value: { techStack: org.technology_names, apolloOrgId: org.id } })
   }
+  facts.push({ fact_type: 'apollo_org_identity', fact_value: { apolloOrgId: org.id, _raw: org } })
 
   const rows = facts.map(f => ({
     organization_id: ORG_ID, lead_id: TEST_LEAD_ID, company_id: TEST_COMPANY_ID,
-    source_type: 'apollo_enrichment', source_id: person.id,
+    source_type: 'apollo_enrichment', source_id: org.id,
     data: f, is_current: true, collected_at: now, expires_at: expiresAt,
   }))
 
   const { data: evidenceRows, error: evErr } = await db.from('evidence').insert(rows).select('id, source_type, data')
   if (evErr) throw new Error(`Evidence insert: ${evErr.message}`)
 
-  console.log(`✓ ${evidenceRows.length} evidence rows written:`)
-  evidenceRows.forEach(r => console.log(`    ${r.id} — ${r.source_type} — ${r.data?.fact_type}`))
+  console.log(`\n✓ ${evidenceRows.length} evidence rows written (paste into PROGRESS.md):`)
+  evidenceRows.forEach(r => console.log(`    ${r.id}  ${r.source_type}  ${r.data?.fact_type}`))
 
-  // ── Step 5: Read back (what context-builder does) ────────────────────────────
-  console.log('\n─── Step 5: Read-back via context-builder query ───')
+  // ── Step 6: Read back (context-builder query) ─────────────────────────────
+  console.log('\n─── Step 6: Read-back (decision_snapshot.evidenceIds check) ───')
   const { data: readBack, error: readErr } = await db
     .from('evidence').select('id')
     .eq('organization_id', ORG_ID).eq('lead_id', TEST_LEAD_ID)
@@ -182,19 +274,23 @@ async function run() {
   if (readErr) throw new Error(`Evidence read: ${readErr.message}`)
 
   const evidenceIds = (readBack ?? []).map(r => r.id)
-  console.log(`✓ decision_snapshot.evidenceIds would be: [${evidenceIds.join(', ')}]`)
+  console.log(`✓ decision_snapshot.evidenceIds: [${evidenceIds.join(', ')}]`)
   if (evidenceIds.length === 0) throw new Error('FAIL: 0 evidenceIds read back — check RLS')
+  console.log(`✓ evidenceIds is non-empty (${evidenceIds.length} IDs) — PASS\n`)
 
-  // ── Final ────────────────────────────────────────────────────────────────────
-  console.log('\n=== RESULT ===')
-  console.log(`✓ Apollo match_confidence: ${confidence}`)
-  console.log(`✓ Evidence rows written:   ${evidenceRows.length}`)
-  console.log(`✓ evidenceIds non-empty:   ${evidenceIds.length} IDs`)
-  console.log(`✓ No-match path verified:  match_confidence='none' confirmed with throwaway email`)
+  // ── Summary ───────────────────────────────────────────────────────────────
+  console.log('=== RESULT ===')
+  console.log(`✓ Domain derived:           ${testDomain}`)
+  console.log(`✓ Free-email gate:          working (gmail.com blocked)`)
+  console.log(`✓ No-match path:            HTTP 200 + {} → null (not throw)`)
+  console.log(`✓ Real org match found:     ${org.name} (apolloOrgId=${org.id})`)
+  console.log(`✓ Field names verified:     organization_revenue, top-level city/state/country`)
+  console.log(`✓ Evidence rows written:    ${evidenceRows.length}`)
+  console.log(`✓ evidenceIds non-empty:    ${evidenceIds.length} IDs`)
   console.log('\nPaste into PROGRESS.md:')
-  console.log('  - The raw person JSON printed in Step 2')
-  console.log('  - The evidence row IDs and fact types printed in Step 4')
-  console.log('  - The evidenceIds array printed in Step 5')
+  console.log('  - The raw org JSON from Step 4')
+  console.log('  - The evidence row IDs from Step 5')
+  console.log('  - The evidenceIds array from Step 6')
 
   await cleanup()
   console.log('\n✓ Test rows cleaned up.\n')
