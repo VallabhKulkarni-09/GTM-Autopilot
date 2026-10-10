@@ -27,6 +27,7 @@ import { writeEvent } from '../../../events/event-log.js'
 import { buildDecisionSnapshot } from '../../../evidence/context-builder.js'
 import { OutreachConnector } from '../../../connectors/outreach/outreach.connector.js'
 import { SalesloftConnector } from '../../../connectors/salesloft/salesloft.connector.js'
+import { storeOAuthTokens } from '../../../repositories/connector-config.repository.js'
 import type { ProposedAction } from '../../../actions/types.js'
 import type { ConnectorRegistry } from '../../../actions/action-executor.js'
 
@@ -82,7 +83,13 @@ async function runOutreachEnrollment(state: WorkflowState, decisionSnapshot: any
   if (clientId && clientSecret && accessToken && refreshToken && mailboxId) {
     try {
       outreachConnector = new OutreachConnector()
-      await outreachConnector.connect({ clientId, clientSecret, accessToken, refreshToken, mailboxId })
+      // Pass onTokenRefresh so refreshed tokens are persisted back to connector_config
+      await outreachConnector.connect(
+        { clientId, clientSecret, accessToken, refreshToken, mailboxId },
+        async (tokens) => {
+          await storeOAuthTokens(state.organizationId, 'outreach', tokens)
+        }
+      )
     } catch (connErr) {
       console.warn(`[first-touch] Outreach connect failed — proceeding without enrollment: ${(connErr as Error).message}`)
       outreachConnector = null
@@ -115,8 +122,11 @@ async function runOutreachEnrollment(state: WorkflowState, decisionSnapshot: any
         console.log(`[first-touch] Created Outreach prospect: ${outreachProspectId}`)
       }
     } catch (err) {
-      console.warn(`[first-touch] Failed to resolve Outreach prospect for ${state.lead.email}: ${err}`)
-      outreachProspectId = undefined
+      // Prospect resolution failed — do NOT silently pass an empty ID to executeAction.
+      // That would cause action-executor to mark the lead 'in_sequence' with no actual sequence.
+      // Rethrow here; the outer catch in firstTouch() writes action_execution_failed to event_log.
+      console.error(`[first-touch] Outreach prospect resolution failed for ${state.lead.email}: ${err}`)
+      throw err
     }
   }
 
@@ -154,12 +164,17 @@ async function runSalesloftEnrollment(
 
   try {
     salesloftConnector = new SalesloftConnector()
-    await salesloftConnector.connect({
-      clientId:     config.clientId,
-      clientSecret: config.clientSecret,
-      accessToken:  config.accessToken,
-      refreshToken: config.refreshToken,
-    })
+    await salesloftConnector.connect(
+      {
+        clientId:     config.clientId,
+        clientSecret: config.clientSecret,
+        accessToken:  config.accessToken,
+        refreshToken: config.refreshToken,
+      },
+      async (tokens) => {
+        await storeOAuthTokens(state.organizationId, 'salesloft', tokens)
+      }
+    )
   } catch (connErr) {
     console.warn(`[first-touch] Salesloft connect failed — skipping enrollment: ${(connErr as Error).message}`)
     salesloftConnector = null
@@ -188,8 +203,10 @@ async function runSalesloftEnrollment(
         console.log(`[first-touch] Created Salesloft person: ${salesloftPersonId}`)
       }
     } catch (err) {
-      console.warn(`[first-touch] Failed to resolve Salesloft person for ${state.lead.email}: ${err}`)
-      salesloftPersonId = undefined
+      // Person resolution failed — do NOT silently pass an empty ID to executeAction.
+      // Rethrow here; the outer catch in firstTouch() writes action_execution_failed.
+      console.error(`[first-touch] Salesloft person resolution failed for ${state.lead.email}: ${err}`)
+      throw err
     }
   }
 

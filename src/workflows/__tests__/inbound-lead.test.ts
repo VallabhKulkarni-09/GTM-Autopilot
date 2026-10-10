@@ -33,7 +33,15 @@ vi.mock('../../evidence/context-builder.js', () => ({
 
 vi.mock('../../repositories/lead.repo.js', () => ({
   leadRepo: {
-    isDuplicate: vi.fn().mockResolvedValue(false)
+    isDuplicate:           vi.fn().mockResolvedValue(false),
+    // Default: return a recent play so the re-enrollment window has NOT elapsed.
+    // Duplicate tests override isDuplicate→true; getLatestPlayForEmail returning
+    // a recent play means the system correctly routes to mark_duplicate (not re-enroll).
+    getLatestPlayForEmail: vi.fn().mockResolvedValue({
+      status:         'completed',
+      updated_at:     new Date().toISOString(),
+      first_touch_at: new Date().toISOString(),
+    }),
   }
 }))
 
@@ -101,6 +109,11 @@ describe('inbound-lead workflow', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     vi.mocked(leadRepo.isDuplicate).mockResolvedValue(false)
+    vi.mocked(leadRepo.getLatestPlayForEmail).mockResolvedValue({
+      status:         'completed',
+      updated_at:     new Date().toISOString(),
+      first_touch_at: new Date().toISOString(),
+    })
   })
 
   it('runs happy path', async () => {

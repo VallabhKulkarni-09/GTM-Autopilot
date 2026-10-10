@@ -19,7 +19,12 @@ const DEFAULT_SLA_MINUTES = 15
 /**
  * Resolve HubSpot portalId → organization UUID.
  * Looks up the org by matching portalId stored in connector_config.
- * Falls back to DEFAULT_ORG_ID if set and is a valid UUID.
+ *
+ * If no match is found, throws a descriptive error — the operator must configure
+ * connector_config with { portal_id: "<portalId>" } for the HubSpot connector.
+ * There is no DEFAULT_ORG_ID fallback: a missing mapping is a misconfiguration,
+ * not a recoverable state. Failing here causes BullMQ to retry (with backoff),
+ * which is the correct behaviour during a configuration race on first deploy.
  */
 async function resolveOrganizationId(portalId: number | string | undefined): Promise<string> {
   const db = getDb()
@@ -36,16 +41,13 @@ async function resolveOrganizationId(portalId: number | string | undefined): Pro
     if (data?.organization_id) return data.organization_id
   }
 
-  // Fallback: DEFAULT_ORG_ID must be a valid UUID
-  const fallback = process.env.DEFAULT_ORG_ID
-  if (!fallback || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(fallback)) {
-    throw new Error(
-      `[inbound-lead-worker] Cannot resolve organization UUID from portalId=${portalId}. ` +
-      `Set DEFAULT_ORG_ID env var to a valid UUID or configure connector_config.hubspot.portal_id.`
-    )
-  }
-
-  return fallback
+  // No mapping found — this is a misconfiguration, not a transient error.
+  // BullMQ will retry; operator must add connector_config row for this portal.
+  throw new Error(
+    `[inbound-lead-worker] Cannot resolve organization UUID from portalId=${portalId}. ` +
+    `Configure connector_config: insert a row with connector_name='hubspot' and ` +
+    `config containing { "portal_id": "${portalId}" } for the correct organization.`
+  )
 }
 
 /**

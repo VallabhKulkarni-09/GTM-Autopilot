@@ -21,13 +21,30 @@ import { addJob } from '../setup.js'
 
 
 export async function runSlaTimer(organizationIds: string[]): Promise<void> {
-  for (const orgId of organizationIds) {
-    await checkBreachedPlays(orgId)
-    // checkDueFollowUps is intentionally omitted in MVP — see file header.
+  // ── Guard: fail loudly if org list is empty ───────────────────────────────
+  // An empty list means no SLA enforcement runs — this is always a misconfiguration.
+  // start-workers.ts should always pass at least one org via ACTIVE_ORG_IDS or DB query.
+  if (organizationIds.length === 0) {
+    console.error(
+      '[sla-timer] CRITICAL: called with zero organization IDs — no SLA checks will run. ' +
+      'Ensure ACTIVE_ORG_IDS is set, or that active orgs exist in the organizations table. ' +
+      'This is a misconfiguration, not a transient error.'
+    )
+    return
   }
+
+  console.log(`[sla-timer] Checking SLA for ${organizationIds.length} org(s): ${organizationIds.join(', ')}`)
+  let totalBreached = 0
+
+  for (const orgId of organizationIds) {
+    const breachedCount = await checkBreachedPlays(orgId)
+    totalBreached += breachedCount
+  }
+
+  console.log(`[sla-timer] Run complete — orgs checked: ${organizationIds.length}, plays breached this run: ${totalBreached}`)
 }
 
-async function checkBreachedPlays(orgId: string): Promise<void> {
+async function checkBreachedPlays(orgId: string): Promise<number> {
   // Select only columns that exist on play_instance (schema: migration 008).
   // first_touch_deadline already encodes the absolute deadline — no sla_minutes needed.
   const { data: breached, error } = await getDb()
@@ -41,10 +58,15 @@ async function checkBreachedPlays(orgId: string): Promise<void> {
 
   if (error) {
     console.error(`[sla-timer] Failed to query breached plays for org ${orgId}: ${error.message}`)
-    return
+    return 0
   }
 
-  for (const play of breached ?? []) {
+  const plays = breached ?? []
+  if (plays.length > 0) {
+    console.log(`[sla-timer] Org ${orgId}: ${plays.length} play(s) breached SLA`)
+  }
+
+  for (const play of plays) {
     // ── 1. Write sla_breached event ──────────────────────────────────────────
     try {
       await writeEvent({
@@ -81,4 +103,6 @@ async function checkBreachedPlays(orgId: string): Promise<void> {
     // ── 3. Enqueue escalation at priority 1 ───────────────────────────────────
     await addJob('escalate-play', { playId: play.id, organizationId: orgId }, { priority: 1 })
   }
+
+  return plays.length
 }

@@ -41,9 +41,18 @@ export class SalesloftConnector implements Connector<SalesloftConfig> {
   readonly name    = 'salesloft' as const
   readonly version = '1.0.0'
   private config: SalesloftConfig | null = null
+  /**
+   * Called after every successful token refresh with the new tokens.
+   * Injected at connect() time by the caller. Keeps repository access out of the connector.
+   */
+  private onTokenRefresh?: (tokens: { access_token: string; refresh_token: string; expires_at: number; scope?: string }) => Promise<void>
 
-  async connect(config: SalesloftConfig): Promise<void> {
+  async connect(
+    config: SalesloftConfig,
+    onTokenRefresh?: (tokens: { access_token: string; refresh_token: string; expires_at: number; scope?: string }) => Promise<void>
+  ): Promise<void> {
     this.config = { ...config }
+    this.onTokenRefresh = onTokenRefresh
   }
 
   async disconnect(): Promise<void> {
@@ -229,6 +238,20 @@ export class SalesloftConnector implements Connector<SalesloftConfig> {
     cfg.accessToken  = tokens.access_token
     cfg.refreshToken = tokens.refresh_token  // Salesloft rotates refresh tokens
     console.log('[salesloft] Access token refreshed successfully')
+
+    // Persist refreshed tokens via callback (injected at connect() time).
+    if (this.onTokenRefresh) {
+      try {
+        await this.onTokenRefresh({
+          access_token:  tokens.access_token,
+          refresh_token: tokens.refresh_token,
+          expires_at:    Date.now() + (tokens.expires_in ?? 7200) * 1000,
+          scope:         tokens.scope,
+        })
+      } catch (persistErr) {
+        console.error(`[salesloft] onTokenRefresh callback failed — tokens refreshed in-memory only: ${persistErr}`)
+      }
+    }
   }
 
   private authHeaders(): Record<string, string> {

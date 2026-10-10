@@ -6,23 +6,32 @@
  * (org-scoped, RLS-protected) so the connector works across restarts.
  *
  * Routes:
- *   GET /api/outreach/oauth/start    → redirects to Outreach authorization URL
- *   GET /api/outreach/oauth/callback → exchanges code for tokens, stores in DB,
- *                                      redirects to dashboard with ?connected=outreach
+ *   POST /api/outreach/oauth/start    → (JWT required) creates a server-side nonce,
+ *                                       returns { authorizationUrl } as JSON.
+ *                                       Dashboard JS does: window.location.href = authorizationUrl
+ *   GET  /api/outreach/oauth/callback → (no JWT — browser redirect from Outreach)
+ *                                       looks up and consumes nonce, exchanges code for tokens,
+ *                                       redirects to dashboard with ?connected=outreach
  *
- * State parameter: `<organizationId>:<csrfToken>` — used to correlate the callback
- * to the right org and prevent CSRF.
+ * Security model:
+ *   - org_id is NEVER in the URL or state parameter sent to Outreach.
+ *   - state = a random 32-byte hex nonce, stored server-side in oauth_nonce table.
+ *   - The callback resolves org_id by looking up the nonce, then deletes it.
+ *   - A nonce that is expired, unknown, or already used → redirect to error page.
+ *   - Cross-org: impossible — the nonce is created by the authenticated org's JWT.
  *
- * Env vars required at startup:
+ * The registered callback URL with Outreach does NOT change:
+ *   https://gtm-api-production-adc0.up.railway.app/api/outreach/oauth/callback
+ *
+ * Env vars required:
  *   OUTREACH_CLIENT_ID
  *   OUTREACH_CLIENT_SECRET
  *   OUTREACH_REDIRECT_URI (= https://gtm-api-production-adc0.up.railway.app/api/outreach/oauth/callback)
  *   DASHBOARD_URL (= https://gtm-autopilot-dashboard.vercel.app)
  *
- * ⚠️ CREDENTIAL ACCESS NOTE:
- *   This route is code-complete. Live verification is blocked on obtaining an
- *   Outreach OAuth app Client ID + Secret from developers.outreach.io.
- *   See PROGRESS.md for status.
+ * Status: CODE-COMPLETE-UNVERIFIED
+ *   The nonce logic is tested with negative cases (replayed, expired, cross-org).
+ *   The full OAuth round-trip cannot be verified until Outreach partner approval is granted.
  */
 
 import { randomBytes } from 'crypto'
@@ -31,6 +40,7 @@ import { ConnectorError } from '../connectors/base.js'
 import { OutreachErrorCode } from '../connectors/outreach/outreach.errors.js'
 import type { OutreachTokenResponse } from '../connectors/outreach/outreach.types.js'
 import { storeOAuthTokens } from '../repositories/connector-config.repository.js'
+import { getDb } from '../db/client.js'
 
 const OR_AUTHORIZE_URL = 'https://api.outreach.io/oauth/authorize'
 const OR_TOKEN_URL     = 'https://api.outreach.io/oauth/token'
@@ -43,60 +53,102 @@ const REQUIRED_SCOPES = [
   'mailboxes.read',
 ].join(' ')
 
+/** Nonce TTL in milliseconds (10 minutes) */
+const NONCE_TTL_MS = 10 * 60 * 1000
+
 export async function outreachOAuthRoutes(app: FastifyInstance): Promise<void> {
 
-  // ── GET /api/outreach/oauth/start ──────────────────────────────────────────
-  app.get<{ Querystring: { org_id?: string } }>(
-    '/start',
-    async (req, reply) => {
-      const clientId    = process.env.OUTREACH_CLIENT_ID
-      const redirectUri = process.env.OUTREACH_REDIRECT_URI
-
-      if (!clientId || !redirectUri) {
-        return reply.status(500).send({
-          error: 'OUTREACH_NOT_CONFIGURED',
-          message: 'OUTREACH_CLIENT_ID and OUTREACH_REDIRECT_URI must be set in env vars',
-        })
-      }
-
-      // org_id comes from the query param (set by the dashboard "Connect" button)
-      // state = orgId:csrfToken — correlates callback to the right org
-      const orgId = req.query.org_id ?? process.env.DEFAULT_ORG_ID ?? ''
-      const csrf  = randomBytes(16).toString('hex')
-      const state = `${orgId}:${csrf}`
-
-      const params = new URLSearchParams({
-        client_id:     clientId,
-        redirect_uri:  redirectUri,
-        response_type: 'code',
-        scope:         REQUIRED_SCOPES,
-        state,
-      })
-
-      return reply.redirect(`${OR_AUTHORIZE_URL}?${params.toString()}`)
+  // ── POST /api/outreach/oauth/start ─────────────────────────────────────────
+  // JWT-authenticated. Extracts org_id from tenantContext (never from query string).
+  // Creates a server-side nonce and returns the Outreach authorization URL as JSON.
+  // The dashboard calls this endpoint, then redirects the browser to the returned URL.
+  app.post('/start', async (req, reply) => {
+    const orgId = (req as any).tenantContext?.organizationId
+    if (!orgId) {
+      return reply.status(401).send({ error: 'MISSING_TENANT', message: 'Valid JWT required', requestId: req.id })
     }
-  )
+
+    const clientId    = process.env.OUTREACH_CLIENT_ID
+    const redirectUri = process.env.OUTREACH_REDIRECT_URI
+
+    if (!clientId || !redirectUri) {
+      return reply.status(500).send({
+        error: 'OUTREACH_NOT_CONFIGURED',
+        message: 'OUTREACH_CLIENT_ID and OUTREACH_REDIRECT_URI must be set in env vars',
+        requestId: req.id,
+      })
+    }
+
+    // Generate a cryptographically random nonce (32 bytes = 64 hex chars)
+    const nonce     = randomBytes(32).toString('hex')
+    const expiresAt = new Date(Date.now() + NONCE_TTL_MS).toISOString()
+
+    // Store nonce server-side with org binding
+    const { error: dbErr } = await getDb()
+      .from('oauth_nonce')
+      .insert({ organization_id: orgId, nonce, connector_name: 'outreach', expires_at: expiresAt })
+
+    if (dbErr) {
+      req.log.error({ dbErr }, '[outreach-oauth] Failed to store nonce')
+      return reply.status(500).send({ error: 'NONCE_STORE_FAILED', message: 'Internal error — please retry', requestId: req.id })
+    }
+
+    // Build authorization URL with nonce as state (no org_id in URL)
+    const params = new URLSearchParams({
+      client_id:     clientId,
+      redirect_uri:  redirectUri,
+      response_type: 'code',
+      scope:         REQUIRED_SCOPES,
+      state:         nonce,
+    })
+
+    return reply.send({ authorizationUrl: `${OR_AUTHORIZE_URL}?${params.toString()}` })
+  })
 
   // ── GET /api/outreach/oauth/callback ───────────────────────────────────────
+  // No JWT — this is a browser redirect from Outreach.
+  // Looks up and consumes the nonce to get org_id, then exchanges code for tokens.
   app.get<{ Querystring: { code?: string; state?: string; error?: string } }>(
     '/callback',
     async (req, reply) => {
       const dashboardUrl = process.env.DASHBOARD_URL ?? 'https://gtm-autopilot-dashboard.vercel.app'
-      const { code, state, error } = req.query
+      const { code, state: nonce, error } = req.query
 
       if (error) {
         return reply.redirect(`${dashboardUrl}/settings?error=outreach_denied`)
       }
-      if (!code || !state) {
+      if (!code || !nonce) {
         return reply.redirect(`${dashboardUrl}/settings?error=outreach_missing_code`)
       }
 
-      // Parse state to extract orgId
-      const [orgId] = state.split(':')
-      if (!orgId) {
+      // ── Look up and consume the nonce ──────────────────────────────────────
+      const { data: nonceRow, error: lookupErr } = await getDb()
+        .from('oauth_nonce')
+        .select('id, organization_id, expires_at')
+        .eq('nonce', nonce)
+        .eq('connector_name', 'outreach')
+        .single()
+
+      if (lookupErr || !nonceRow) {
+        req.log.warn({ nonce }, '[outreach-oauth] Nonce not found — may be replayed or expired')
         return reply.redirect(`${dashboardUrl}/settings?error=outreach_invalid_state`)
       }
 
+      // Reject expired nonces (belt-and-suspenders; the query could also filter this)
+      if (new Date(nonceRow.expires_at) < new Date()) {
+        // Delete expired row
+        await getDb().from('oauth_nonce').delete().eq('id', nonceRow.id)
+        req.log.warn({ nonce }, '[outreach-oauth] Nonce expired')
+        return reply.redirect(`${dashboardUrl}/settings?error=outreach_nonce_expired`)
+      }
+
+      // Consume the nonce — single use. Delete BEFORE the token exchange to prevent
+      // a replay attack if the token exchange call is slow.
+      await getDb().from('oauth_nonce').delete().eq('id', nonceRow.id)
+
+      const orgId = nonceRow.organization_id
+
+      // ── Exchange authorization code for tokens ─────────────────────────────
       const clientId     = process.env.OUTREACH_CLIENT_ID
       const clientSecret = process.env.OUTREACH_CLIENT_SECRET
       const redirectUri  = process.env.OUTREACH_REDIRECT_URI

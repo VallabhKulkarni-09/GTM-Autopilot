@@ -369,13 +369,31 @@ export async function executeAction(
         }
 
         // ── Warn if neither enrolled ──────────────────────────────────────────
+        // CRITICAL: do NOT set stage='in_sequence' or status='completed' if no enrollment
+        // happened. Doing so causes the lead to silently disappear from the "needs contact"
+        // queue while the SLA timer stops watching it. Instead: escalate and keep stage='routing'.
         if (!outreachAvailable && !salesloftAvailable) {
-          console.warn(
-            `[action-executor] start_sequence: no SEP connector available — enrollment skipped. ` +
+          console.error(
+            `[action-executor] start_sequence: no SEP connector available — escalating. ` +
             `outreach_prospect_id=${params.outreach_prospect_id ?? 'missing'}, ` +
             `sequence_id=${params.sequence_id ?? 'missing'}, ` +
             `salesloft_person_id=${params.salesloft_person_id ?? 'missing'}, ` +
             `cadence_id=${params.cadence_id ?? 'missing'} (org=${organizationId})`
+          )
+          // Keep play visible: stage stays 'routing', play status stays 'running'
+          // so the SLA timer continues to watch it and human operators can act.
+          await updateLead(action.target.leadId, organizationId, { stage: 'routing' })
+          // Enqueue escalation at priority 2 (lower than SLA breach at priority 1)
+          try {
+            const { addJob } = await import('../queue/setup.js')
+            await addJob('escalate-play', { playId: playInstanceId, organizationId }, { priority: 2 })
+          } catch (escalateErr) {
+            console.error(`[action-executor] Failed to enqueue escalation for no-SEP: ${escalateErr}`)
+          }
+          // Throw so the try/catch writes action_execution_failed to event_log
+          throw Object.assign(
+            new Error(`NO_SEP_CONNECTOR_AVAILABLE: no Outreach or Salesloft connector configured for org ${organizationId}`),
+            { code: 'NO_SEP_CONNECTOR_AVAILABLE', statusCode: 0, raw: { organizationId } }
           )
         }
 
@@ -386,7 +404,7 @@ export async function executeAction(
           ...(outreachAvailable ? { sequence_id: params.sequence_id, enrolled_at: new Date().toISOString() } : {}),
           ...(salesloftAvailable ? { cadence_id: params.cadence_id, enrolled_at: new Date().toISOString() } : {}),
         })
-        await updateLead(action.target.leadId, organizationId, { stage: enrolled ? 'in_sequence' : 'nurture' })
+        await updateLead(action.target.leadId, organizationId, { stage: 'in_sequence' })
         result = {
           success: true,
           ...(outreachAvailable && sequenceStateId ? { externalSystem: 'outreach' as ConnectorName, externalId: sequenceStateId } : {}),
@@ -394,6 +412,7 @@ export async function executeAction(
           output: {
             outreach_synced:  outreachAvailable,
             salesloft_synced: salesloftAvailable,
+            enrolled,
             ...(params.outreach_prospect_id ? { outreach_prospect_id: params.outreach_prospect_id } : {}),
             ...(sequenceStateId ? { sequence_state_id: sequenceStateId } : {}),
             ...(params.salesloft_person_id ? { salesloft_person_id: params.salesloft_person_id } : {}),

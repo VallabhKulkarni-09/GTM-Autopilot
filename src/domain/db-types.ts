@@ -42,6 +42,7 @@ export type PolicyRuleType =
   | 'territory'
   | 'sla'
   | 'dedup'
+  | 're_enrollment'
   | 'routing'
   | 'outcome_detection'
 
@@ -80,6 +81,7 @@ export type EventType =
   // Deduplication
   | 'dedup_passed'
   | 'dedup_rejected'
+  | 'reenrollment_allowed'  // returning lead passed time-window + terminal-status re-enrollment check
   // Agent decisions
   | 'action_proposed'
   | 'action_risk_assessed'
@@ -303,6 +305,17 @@ export type DecisionSnapshot = {
   agentVersion: string
   promptVersion: string | null            // null for rule-based agents
   modelName: string | null                // null for rule-based agents
+  // Optional context fields appended by specific nodes
+  reenrollmentContext?: {
+    priorPlayStatus: string
+    priorPlayAge:    string   // human-readable, e.g. "95d"
+    allowAfterDays:  number
+  }
+  humanReviewContext?: {
+    actorUserId: string
+    decision:    'approved' | 'rejected'
+    playStateAtDecision: Record<string, unknown>
+  }
 }
 
 export type EventLog = {

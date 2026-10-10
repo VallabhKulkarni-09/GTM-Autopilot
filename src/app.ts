@@ -59,7 +59,9 @@ export function buildApp() {
   app.register(connectorRoutes,     { prefix: '/api/connectors' })
   app.register(policyRoutes,        { prefix: '/api/policies' })
 
-  // Outreach + Salesloft OAuth setup (no tenant middleware — credential bootstrap)
+  // Outreach + Salesloft OAuth:
+  //   POST /start → sits under /api/* → tenantContextMiddleware applied → org_id from JWT
+  //   GET  /callback → browser redirect from vendor → no JWT → nonce lookup resolves org_id
   app.register(outreachOAuthRoutes,  { prefix: '/api/outreach/oauth' })
   app.register(salesloftOAuthRoutes, { prefix: '/api/salesloft/oauth' })
 

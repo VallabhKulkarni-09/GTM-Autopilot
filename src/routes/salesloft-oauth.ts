@@ -1,24 +1,27 @@
 /**
  * src/routes/salesloft-oauth.ts
  *
- * OAuth2 setup routes for Salesloft connector.
- * Mirrors the Outreach OAuth route pattern exactly.
+ * OAuth2 setup routes for Salesloft connector. Mirrors outreach-oauth.ts exactly.
  *
  * Routes:
- *   GET /api/salesloft/oauth/start    → redirects to Salesloft authorization URL
- *   GET /api/salesloft/oauth/callback → exchanges code for tokens, stores in DB,
- *                                       redirects to dashboard with ?connected=salesloft
+ *   POST /api/salesloft/oauth/start    → (JWT required) creates server-side nonce,
+ *                                        returns { authorizationUrl } as JSON.
+ *   GET  /api/salesloft/oauth/callback → (no JWT — browser redirect from Salesloft)
+ *                                        looks up and consumes nonce, exchanges code,
+ *                                        redirects to dashboard with ?connected=salesloft
+ *
+ * The registered callback URL with Salesloft does NOT change:
+ *   https://gtm-api-production-adc0.up.railway.app/api/salesloft/oauth/callback
  *
  * Env vars required:
  *   SALESLOFT_CLIENT_ID
  *   SALESLOFT_CLIENT_SECRET
- *   SALESLOFT_REDIRECT_URI (= https://gtm-api-production-adc0.up.railway.app/api/salesloft/oauth/callback)
+ *   SALESLOFT_REDIRECT_URI
  *   DASHBOARD_URL
  *
- * ⚠️ CREDENTIAL ACCESS NOTE:
- *   This route is code-complete. Live verification is blocked on obtaining a
- *   Salesloft OAuth app from the Salesloft App Portal (developers.salesloft.com).
- *   Dev credentials (≤10 users) may be self-service. See PROGRESS.md.
+ * Status: CODE-COMPLETE-UNVERIFIED
+ *   Nonce logic tested with negative cases (replayed, expired, cross-org).
+ *   Full OAuth round-trip blocked on Salesloft App Portal approval.
  */
 
 import { randomBytes } from 'crypto'
@@ -27,11 +30,11 @@ import { ConnectorError } from '../connectors/base.js'
 import { SalesloftErrorCode } from '../connectors/salesloft/salesloft.errors.js'
 import type { SalesloftTokenResponse } from '../connectors/salesloft/salesloft.types.js'
 import { storeOAuthTokens } from '../repositories/connector-config.repository.js'
+import { getDb } from '../db/client.js'
 
 const SL_AUTHORIZE_URL = 'https://accounts.salesloft.com/oauth/authorize'
 const SL_TOKEN_URL     = 'https://accounts.salesloft.com/oauth/token'
 
-// Salesloft OAuth scopes (verified against Salesloft API docs)
 const REQUIRED_SCOPES = [
   'cadences.r',
   'cadences.w',
@@ -39,56 +42,87 @@ const REQUIRED_SCOPES = [
   'people.w',
 ].join(' ')
 
+const NONCE_TTL_MS = 10 * 60 * 1000
+
 export async function salesloftOAuthRoutes(app: FastifyInstance): Promise<void> {
 
-  // ── GET /api/salesloft/oauth/start ─────────────────────────────────────────
-  app.get<{ Querystring: { org_id?: string } }>(
-    '/start',
-    async (req, reply) => {
-      const clientId    = process.env.SALESLOFT_CLIENT_ID
-      const redirectUri = process.env.SALESLOFT_REDIRECT_URI
-
-      if (!clientId || !redirectUri) {
-        return reply.status(500).send({
-          error: 'SALESLOFT_NOT_CONFIGURED',
-          message: 'SALESLOFT_CLIENT_ID and SALESLOFT_REDIRECT_URI must be set in env vars',
-        })
-      }
-
-      const orgId = req.query.org_id ?? process.env.DEFAULT_ORG_ID ?? ''
-      const csrf  = randomBytes(16).toString('hex')
-      const state = `${orgId}:${csrf}`
-
-      const params = new URLSearchParams({
-        client_id:     clientId,
-        redirect_uri:  redirectUri,
-        response_type: 'code',
-        scope:         REQUIRED_SCOPES,
-        state,
-      })
-
-      return reply.redirect(`${SL_AUTHORIZE_URL}?${params.toString()}`)
+  // ── POST /api/salesloft/oauth/start ─────────────────────────────────────────
+  app.post('/start', async (req, reply) => {
+    const orgId = (req as any).tenantContext?.organizationId
+    if (!orgId) {
+      return reply.status(401).send({ error: 'MISSING_TENANT', message: 'Valid JWT required', requestId: req.id })
     }
-  )
+
+    const clientId    = process.env.SALESLOFT_CLIENT_ID
+    const redirectUri = process.env.SALESLOFT_REDIRECT_URI
+
+    if (!clientId || !redirectUri) {
+      return reply.status(500).send({
+        error: 'SALESLOFT_NOT_CONFIGURED',
+        message: 'SALESLOFT_CLIENT_ID and SALESLOFT_REDIRECT_URI must be set in env vars',
+        requestId: req.id,
+      })
+    }
+
+    const nonce     = randomBytes(32).toString('hex')
+    const expiresAt = new Date(Date.now() + NONCE_TTL_MS).toISOString()
+
+    const { error: dbErr } = await getDb()
+      .from('oauth_nonce')
+      .insert({ organization_id: orgId, nonce, connector_name: 'salesloft', expires_at: expiresAt })
+
+    if (dbErr) {
+      req.log.error({ dbErr }, '[salesloft-oauth] Failed to store nonce')
+      return reply.status(500).send({ error: 'NONCE_STORE_FAILED', message: 'Internal error — please retry', requestId: req.id })
+    }
+
+    const params = new URLSearchParams({
+      client_id:     clientId,
+      redirect_uri:  redirectUri,
+      response_type: 'code',
+      scope:         REQUIRED_SCOPES,
+      state:         nonce,
+    })
+
+    return reply.send({ authorizationUrl: `${SL_AUTHORIZE_URL}?${params.toString()}` })
+  })
 
   // ── GET /api/salesloft/oauth/callback ──────────────────────────────────────
   app.get<{ Querystring: { code?: string; state?: string; error?: string } }>(
     '/callback',
     async (req, reply) => {
       const dashboardUrl = process.env.DASHBOARD_URL ?? 'https://gtm-autopilot-dashboard.vercel.app'
-      const { code, state, error } = req.query
+      const { code, state: nonce, error } = req.query
 
       if (error) {
         return reply.redirect(`${dashboardUrl}/settings?error=salesloft_denied`)
       }
-      if (!code || !state) {
+      if (!code || !nonce) {
         return reply.redirect(`${dashboardUrl}/settings?error=salesloft_missing_code`)
       }
 
-      const [orgId] = state.split(':')
-      if (!orgId) {
+      const { data: nonceRow, error: lookupErr } = await getDb()
+        .from('oauth_nonce')
+        .select('id, organization_id, expires_at')
+        .eq('nonce', nonce)
+        .eq('connector_name', 'salesloft')
+        .single()
+
+      if (lookupErr || !nonceRow) {
+        req.log.warn({ nonce }, '[salesloft-oauth] Nonce not found — may be replayed or expired')
         return reply.redirect(`${dashboardUrl}/settings?error=salesloft_invalid_state`)
       }
+
+      if (new Date(nonceRow.expires_at) < new Date()) {
+        await getDb().from('oauth_nonce').delete().eq('id', nonceRow.id)
+        req.log.warn({ nonce }, '[salesloft-oauth] Nonce expired')
+        return reply.redirect(`${dashboardUrl}/settings?error=salesloft_nonce_expired`)
+      }
+
+      // Consume the nonce before token exchange (prevents replay on slow network)
+      await getDb().from('oauth_nonce').delete().eq('id', nonceRow.id)
+
+      const orgId = nonceRow.organization_id
 
       const clientId     = process.env.SALESLOFT_CLIENT_ID
       const clientSecret = process.env.SALESLOFT_CLIENT_SECRET
@@ -124,7 +158,6 @@ export async function salesloftOAuthRoutes(app: FastifyInstance): Promise<void> 
         return reply.redirect(`${dashboardUrl}/settings?error=salesloft_token_exchange_failed`)
       }
 
-      // Persist tokens to connector_config (org-scoped)
       try {
         await storeOAuthTokens(orgId, 'salesloft', {
           access_token:  tokens.access_token,

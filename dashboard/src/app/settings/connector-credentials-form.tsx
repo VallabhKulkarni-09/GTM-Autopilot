@@ -37,16 +37,16 @@ const CONNECTOR_FIELDS: Record<string, FieldDef[]> = {
 }
 
 // ── OAuth connector display names ─────────────────────────────────────────────
-const OAUTH_DISPLAY: Record<string, { label: string; color: string; startPath: string }> = {
+const OAUTH_DISPLAY: Record<string, { label: string; color: string; startApiPath: string }> = {
   outreach: {
-    label:     'Connect with Outreach',
-    color:     '#6C3FCF',
-    startPath: '/api/outreach/oauth/start',
+    label:        'Connect with Outreach',
+    color:        '#6C3FCF',
+    startApiPath: '/api/outreach/oauth/start',
   },
   salesloft: {
-    label:     'Connect with Salesloft',
-    color:     '#00B4D8',
-    startPath: '/api/salesloft/oauth/start',
+    label:        'Connect with Salesloft',
+    color:        '#00B4D8',
+    startApiPath: '/api/salesloft/oauth/start',
   },
 }
 
@@ -95,39 +95,59 @@ function SecretInput({ value, onChange, placeholder, disabled }: {
 }
 
 // ── OAuthConnectorCard — "Connect with Vendor" button ────────────────────────
-function OAuthConnectorCard({ connectorName, isConnected }: { connectorName: string; isConnected: boolean }) {
+function OAuthConnectorCard({ connectorName, token, isConnected }: { connectorName: string; token: string; isConnected: boolean }) {
   const oauthCfg = OAUTH_DISPLAY[connectorName]
   if (!oauthCfg) return null
 
-  const apiUrl    = process.env.NEXT_PUBLIC_API_URL ?? ''
-  const startHref = `${apiUrl}${oauthCfg.startPath}`
+  const apiUrl   = process.env.NEXT_PUBLIC_API_URL ?? ''
+  const startUrl = `${apiUrl}${oauthCfg.startApiPath}`
+
+  // POST /api/:connector/oauth/start (JWT-authenticated)
+  // Returns { authorizationUrl }, then browser redirects.
+  const handleConnect = async () => {
+    try {
+      const res = await fetch(startUrl, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}` },
+      })
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}))
+        alert(`Failed to start OAuth: ${body.message ?? res.statusText}`)
+        return
+      }
+      const { authorizationUrl } = await res.json()
+      window.location.href = authorizationUrl
+    } catch (err) {
+      alert(`Network error starting OAuth: ${err}`)
+    }
+  }
 
   if (isConnected) {
     return (
       <div className="flex items-center gap-2 text-[13px]">
         <CheckCircle2 size={14} strokeWidth={2.5} style={{ color: 'var(--apple-green)' }} />
         <span style={{ color: 'var(--apple-green)', fontWeight: 600 }}>Connected</span>
-        <a
-          href={startHref}
-          className="text-[12px] ml-2 underline underline-offset-2"
+        <button
+          onClick={handleConnect}
+          className="text-[12px] ml-2 underline underline-offset-2 bg-transparent border-none cursor-pointer p-0"
           style={{ color: 'var(--apple-text-tertiary)' }}
         >
           Reconnect
-        </a>
+        </button>
       </div>
     )
   }
 
   return (
     <div>
-      <a
-        href={startHref}
+      <button
+        onClick={handleConnect}
         className="inline-flex items-center gap-2 px-4 py-2 rounded-[8px] text-[13px] font-semibold text-white transition-all duration-150 active:scale-[0.97]"
         style={{ background: oauthCfg.color, boxShadow: `0 1px 3px ${oauthCfg.color}55` }}
       >
         {oauthCfg.label}
         <ExternalLink size={12} />
-      </a>
+      </button>
       <p className="text-[11px] mt-2" style={{ color: 'var(--apple-text-tertiary)' }}>
         You will be redirected to {connectorName.charAt(0).toUpperCase() + connectorName.slice(1)} to authorize access.
         Your credentials are never stored in GTM Autopilot — only short-lived OAuth tokens, scoped to your org.
@@ -141,7 +161,7 @@ export function ConnectorCredentialsForm({ connectorName, token, isConnected = f
   // OAuth connectors: show OAuth button only
   if (OAUTH_CONNECTORS.has(connectorName)) {
     return (
-      <OAuthConnectorCard connectorName={connectorName} isConnected={isConnected} />
+      <OAuthConnectorCard connectorName={connectorName} token={token} isConnected={isConnected} />
     )
   }
 

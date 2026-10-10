@@ -81,4 +81,44 @@ export const leadRepo = {
     if (error) throw new Error(`[lead-repo] list failed: ${error.message}`)
     return { data: (data ?? []) as Lead[], total: count ?? 0 }
   },
+
+  /**
+   * Returns the most recent play_instance for any lead with this email in this org,
+   * excluding the lead identified by excludeLeadId (the current incoming lead).
+   *
+   * Used by validate.ts to determine re-enrollment eligibility:
+   *   - If no prior play exists → lead is new → let through.
+   *   - If a prior play exists → check its status and how long ago it ended.
+   */
+  async getLatestPlayForEmail(
+    organizationId: string,
+    email: string,
+    excludeLeadId?: string
+  ): Promise<{ status: string; updated_at: string; first_touch_at: string | null } | null> {
+    // Find all leads with this email (excluding the current one)
+    let leadQuery = getDb()
+      .from('leads')
+      .select('id')
+      .eq('organization_id', organizationId)
+      .eq('email', email)
+    if (excludeLeadId) {
+      leadQuery = (leadQuery as any).neq('id', excludeLeadId)
+    }
+    const { data: leads, error: leadErr } = await (leadQuery as any)
+    if (leadErr || !leads || leads.length === 0) return null
+
+    const leadIds = leads.map((l: any) => l.id as string)
+
+    // Find the most recent play_instance for those leads
+    const { data: plays, error: playErr } = await getDb()
+      .from('play_instance')
+      .select('status, updated_at, first_touch_at')
+      .eq('organization_id', organizationId)
+      .in('lead_id', leadIds)
+      .order('updated_at', { ascending: false })
+      .limit(1)
+
+    if (playErr || !plays || plays.length === 0) return null
+    return plays[0] as { status: string; updated_at: string; first_touch_at: string | null }
+  },
 }

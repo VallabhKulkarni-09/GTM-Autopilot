@@ -36,9 +36,19 @@ export class OutreachConnector implements Connector<OutreachConfig> {
   readonly name    = 'outreach' as const
   readonly version = '1.0.0'
   private config: OutreachConfig | null = null
+  /**
+   * Called after every successful token refresh with the new tokens.
+   * Injected at construction time by the caller (first-touch.ts, OAuth routes).
+   * Keeps repository access out of the connector layer.
+   */
+  private onTokenRefresh?: (tokens: { access_token: string; refresh_token: string; expires_at: number; scope?: string }) => Promise<void>
 
-  async connect(config: OutreachConfig): Promise<void> {
+  async connect(
+    config: OutreachConfig,
+    onTokenRefresh?: (tokens: { access_token: string; refresh_token: string; expires_at: number; scope?: string }) => Promise<void>
+  ): Promise<void> {
     this.config = { ...config }
+    this.onTokenRefresh = onTokenRefresh
   }
 
   async disconnect(): Promise<void> {
@@ -276,6 +286,21 @@ export class OutreachConnector implements Connector<OutreachConfig> {
     cfg.accessToken  = tokens.access_token
     cfg.refreshToken = tokens.refresh_token  // Outreach rotates refresh tokens
     console.log('[outreach] Access token refreshed successfully')
+
+    // Persist refreshed tokens via callback (injected at connect() time).
+    // Failure here is logged but does not fail the request — the in-memory refresh succeeded.
+    if (this.onTokenRefresh) {
+      try {
+        await this.onTokenRefresh({
+          access_token:  tokens.access_token,
+          refresh_token: tokens.refresh_token,
+          expires_at:    Date.now() + (tokens.expires_in ?? 7200) * 1000,
+          scope:         tokens.scope,
+        })
+      } catch (persistErr) {
+        console.error(`[outreach] onTokenRefresh callback failed — tokens refreshed in-memory only: ${persistErr}`)
+      }
+    }
   }
 
   private authHeaders(): Record<string, string> {

@@ -29,7 +29,12 @@ export async function qualify(state: WorkflowState): Promise<Partial<WorkflowSta
       lead: state.lead,
       company,
       enrichmentEvidence: state.evidence,
-      icpPolicyRules: [], // TODO: load from DB
+      // TODO(policy-studio): icpPolicyRules is intentionally hardcoded to [] for MVP.
+      // The scoring logic in src/agents/qualification/rules.ts is the sole source of truth.
+      // When Policy Studio is built, load rows from policy_rules WHERE rule_type='icp_filter'
+      // for this org and pass them here. Until then, changing policy_rules in the DB has
+      // NO effect on qualification scoring — by design.
+      icpPolicyRules: [],
     }
     const agent = new QualificationAgent()
     const qualificationResult = agent.run(input)

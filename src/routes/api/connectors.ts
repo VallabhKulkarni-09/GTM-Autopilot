@@ -43,7 +43,9 @@ export async function connectorRoutes(app: FastifyInstance) {
   // ── GET /api/connectors ──────────────────────────────────────────────────
   app.get('/', async (request: FastifyRequest, reply: FastifyReply) => {
     const orgId = (request as any).tenantContext?.organizationId
-      ?? process.env.DEFAULT_ORG_ID
+    if (!orgId) {
+      return reply.status(401).send({ error: 'MISSING_TENANT', message: 'Organization context missing — valid JWT required', requestId: request.id })
+    }
 
     const results = await Promise.allSettled([
       // Salesforce — credentials from env vars (client_credentials flow, no redirect)
@@ -139,7 +141,10 @@ export async function connectorRoutes(app: FastifyInstance) {
     ) => {
       const { name } = request.params
       const creds    = request.body
-      const orgId    = (request as any).tenantContext?.organizationId ?? process.env.DEFAULT_ORG_ID
+      const orgId    = (request as any).tenantContext?.organizationId
+      if (!orgId) {
+        return reply.status(401).send({ error: 'MISSING_TENANT', message: 'Organization context missing — valid JWT required', requestId: request.id })
+      }
 
       if (!CONNECTOR_NAMES.includes(name)) {
         return reply.status(400).send({ error: 'INVALID_CONNECTOR', message: `Unknown connector: ${name}`, requestId: request.id })
@@ -242,7 +247,10 @@ export async function connectorRoutes(app: FastifyInstance) {
     ) => {
       const { name } = request.params
       const creds    = request.body
-      const orgId    = (request as any).tenantContext?.organizationId ?? process.env.DEFAULT_ORG_ID
+      const orgId    = (request as any).tenantContext?.organizationId
+      if (!orgId) {
+        return reply.status(401).send({ error: 'MISSING_TENANT', message: 'Organization context missing — valid JWT required', requestId: request.id })
+      }
 
       if (OAUTH_CONNECTORS.includes(name)) {
         return reply.status(400).send({
